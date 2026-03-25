@@ -33,17 +33,26 @@ def parse_qp(text):
     questions = []
 
     lines = text.split("\n")
+    current_q = None
 
     for line in lines:
-        match = re.match(r"^\d+\s*\([a-z]\)", line.strip())
-        if match:
+        line = line.strip()
+
+        # Match main question number (1, 2, 3...)
+        if re.match(r"^\d+\s", line):
+            current_q = re.match(r"^\d+", line).group()
+
+        # Match sub-question (a), (b), etc.
+        elif re.match(r"^\([a-z]\)", line) and current_q:
+            sub_q = re.match(r"\([a-z]\)", line).group()
+            q_no = f"{current_q}{sub_q}"
+
             questions.append({
-                "question": match.group(),
+                "question": q_no,
                 "question_text": line
             })
 
     return questions
-
 
 # ---------- PARSE MARK SCHEME ----------
 def parse_ms(text):
@@ -73,12 +82,14 @@ def map_topic(text):
 
 # ---------- MERGE ----------
 def merge(qp, ms):
-    ms_dict = {item["question"]: item for item in ms}
+    ms_dict = {item["question"].replace(" ", ""): item for item in ms}
     result = []
 
     for q in qp:
-        q_no = q["question"]
+        q_no = q["question"].replace(" ", "")
+
         ans = ms_dict.get(q_no, {}).get("answer", "")
+
         topic = map_topic(q["question_text"])
 
         result.append({
