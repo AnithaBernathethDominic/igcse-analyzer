@@ -35,10 +35,19 @@ document.getElementById("uploadForm").onsubmit = async function(e) {
 
     let formData = new FormData(this);
 
+   
     let res = await fetch("/upload", {
-        method: "POST",
-        body: formData
+    method: "POST",
+    body: formData
     });
+
+   if (!res.ok) {
+      let text = await res.text();
+      console.error("Server Error:", text);
+      alert("Upload failed");
+      return;
+     }
+
 
     let data = await res.json();
 
