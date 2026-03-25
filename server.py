@@ -107,7 +107,7 @@ def save_to_db(data, paper_name):
     for item in data:
         supabase.table("questions").insert({
             "paper": paper_name,
-            "question": item["question"],
+            "question_no": item["question"],   # ✅ FIXED
             "question_text": item["question_text"],
             "answer": item["answer"],
             "topic": item["topic"]
@@ -122,30 +122,30 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    qp_file = request.files["qp"]
-    ms_file = request.files["ms"]
+    try:
+        qp_file = request.files["qp"]
+        ms_file = request.files["ms"]
 
-    paper_name = qp_file.filename
+        paper_name = qp_file.filename
 
-    qp_text = extract_text(qp_file)
-    ms_text = extract_text(ms_file)
+        qp_text = extract_text(qp_file)
+        ms_text = extract_text(ms_file)
 
-    print("QP TEXT:", qp_text[:500])
-    print("MS TEXT:", ms_text[:500])
-    
-    qp_data = parse_qp(qp_text)
-    ms_data = parse_ms(ms_text)
-  
-    print("QP DATA:", qp_data)
-    print("MS DATA:", ms_data)
-   
-    final_data = merge(qp_data, ms_data)
+        qp_data = parse_qp(qp_text)
+        ms_data = parse_ms(ms_text)
 
-    # SAVE TO CLOUD
-    save_to_db(final_data, paper_name)
+        print("QP DATA:", qp_data)
+        print("MS DATA:", ms_data)
 
-    return jsonify(final_data)
+        final_data = merge(qp_data, ms_data)
 
+        save_to_db(final_data, paper_name)
+
+        return jsonify(final_data)
+
+    except Exception as e:
+        print("ERROR:", str(e))   
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/get_all")
 def get_all():
