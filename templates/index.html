@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IGCSE Analyzer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<h2>Upload Question Paper & Mark Scheme</h2>
+
+<form id="uploadForm">
+    <input type="file" name="qp" required>
+    <input type="file" name="ms" required>
+    <button type="submit">Upload</button>
+</form>
+
+<hr>
+
+<h2>Questions Table</h2>
+<table id="resultTable">
+    <thead>
+        <tr>
+            <th>Question</th>
+            <th>Question Text</th>
+            <th>Answer</th>
+            <th>Topic</th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
+<script>
+document.getElementById("uploadForm").onsubmit = async function(e) {
+    e.preventDefault();
+
+    let formData = new FormData(this);
+
+    let res = await fetch("/upload", {
+        method: "POST",
+        body: formData
+    });
+
+    let data = await res.json();
+
+    let table = document.querySelector("#resultTable tbody");
+    table.innerHTML = "";
+
+    data.forEach(row => {
+        let tr = `
+            <tr>
+                <td>${row.question}</td>
+                <td>${row.question_text}</td>
+                <td>${row.answer}</td>
+                <td>${row.topic}</td>
+            </tr>
+        `;
+        table.innerHTML += tr;
+    });
+}
+</script>
+
+</body>
+</html>

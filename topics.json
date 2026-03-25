@@ -1,0 +1,16 @@
+{
+  "Number Systems": ["binary", "hexadecimal", "denary", "overflow", "shift"],
+  "CPU": ["processor", "core", "alu", "cu", "fde"],
+  "Input Devices": ["input", "keyboard", "mouse", "scanner"],
+  "Sensors": ["sensor", "light", "temperature"],
+  "Storage": ["optical", "disk", "ssd", "storage"],
+  "Programming": ["assembly", "language", "mnemonic"],
+  "Translators": ["assembler", "compiler", "interpreter"],
+  "Interrupts": ["interrupt"],
+  "Data Transmission": ["usb", "serial", "parallel"],
+  "Internet": ["url", "http", "browser", "dns", "cookies"],
+  "Cyber Security": ["proxy", "ddos"],
+  "AI": ["machine learning"],
+  "Embedded Systems": ["embedded"],
+  "Cloud Storage": ["cloud"]
+}
