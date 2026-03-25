@@ -31,28 +31,34 @@ def extract_text(file):
 # ---------- PARSE QUESTION PAPER ----------
 def parse_qp(text):
     questions = []
-    pattern = r"(\d+\s*\([a-z]\))"
-    parts = re.split(pattern, text)
 
-    for i in range(1, len(parts), 2):
-        questions.append({
-            "question": parts[i].strip(),
-            "question_text": parts[i + 1].strip()
-        })
+    lines = text.split("\n")
+
+    for line in lines:
+        match = re.match(r"^\d+\s*\([a-z]\)", line.strip())
+        if match:
+            questions.append({
+                "question": match.group(),
+                "question_text": line
+            })
+
     return questions
 
 
 # ---------- PARSE MARK SCHEME ----------
 def parse_ms(text):
     answers = []
-    pattern = r"(\d+\([a-z]\))"
-    parts = re.split(pattern, text)
 
-    for i in range(1, len(parts), 2):
-        answers.append({
-            "question": parts[i].strip(),
-            "answer": parts[i + 1].strip()
-        })
+    lines = text.split("\n")
+
+    for line in lines:
+        match = re.match(r"^\d+\([a-z]\)", line.strip())
+        if match:
+            answers.append({
+                "question": match.group(),
+                "answer": line
+            })
+
     return answers
 
 
@@ -113,9 +119,15 @@ def upload():
     qp_text = extract_text(qp_file)
     ms_text = extract_text(ms_file)
 
+    print("QP TEXT:", qp_text[:500])
+    print("MS TEXT:", ms_text[:500])
+    
     qp_data = parse_qp(qp_text)
     ms_data = parse_ms(ms_text)
-
+  
+    print("QP DATA:", qp_data)
+    print("MS DATA:", ms_data)
+   
     final_data = merge(qp_data, ms_data)
 
     # SAVE TO CLOUD
