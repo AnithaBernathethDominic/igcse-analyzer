@@ -46,23 +46,26 @@ def parse_qp(text):
             line == "" or
             "DO NOT WRITE" in line or
             "Working space" in line or
-            re.match(r"^\.+$", line) or   # dotted lines
-            re.match(r"^\[\d+\]$", line) or  # marks like [2]
-            len(line) < 3
+            re.match(r"^\.+$", line) or
+            re.match(r"^\[\d+\]$", line)
         ):
             continue
 
-        # Remove weird barcode garbage
+        # 🚫 Skip garbage
         if any(char in line for char in ["*", "¬", "Ĭ", "ĥ", "¥"]):
             continue
 
-        # Detect main question number
-        if re.match(r"^\d+\s", line):
+        # 🚫 Skip lines that are just numbers or binary
+        if re.match(r"^[0-9A-F]+$", line):
+            continue
+
+        # ✅ REAL question start (VERY IMPORTANT FIX)
+        if re.match(r"^\d+\s+[A-Z]", line):
             current_q = re.match(r"^\d+", line).group()
 
-        # Detect sub-question (a), (b), (c)
+        # ✅ sub-question
         elif re.match(r"^\([a-z]\)", line):
-            # Save previous question
+
             if current_q and current_sub and current_text:
                 questions.append({
                     "question": f"{current_q}{current_sub}",
@@ -72,11 +75,11 @@ def parse_qp(text):
             current_sub = re.match(r"\([a-z]\)", line).group()
             current_text = line
 
-        # Continue same question
+        # ✅ continue question
         elif current_sub:
             current_text += " " + line
 
-    # Add last question
+    # last question
     if current_q and current_sub and current_text:
         questions.append({
             "question": f"{current_q}{current_sub}",
@@ -109,12 +112,15 @@ def parse_ms(text):
         start = matches[i].start()
         end = matches[i+1].start() if i+1 < len(matches) else len(text)
 
-        a_text = text[start:end]
+        block = text[start:end]
         q_no = matches[i].group()
+
+        # Clean answer text
+        answer = re.sub(r"\s+", " ", block).strip()
 
         answers.append({
             "question": q_no,
-            "answer": a_text.strip()
+            "answer": answer
         })
 
     return answers
@@ -131,24 +137,22 @@ def map_topic(text):
 
 # ---------- MERGE QP + MS ----------
 def merge(qp, ms):
-    ms_dict = {item["question"].replace(" ", ""): item for item in ms}
+    ms_dict = {item["question"]: item for item in ms}
+
     result = []
 
     for q in qp:
-        q_no = q["question"].replace(" ", "")
-        ans = ms_dict.get(q_no, {}).get("answer", "")
+        q_no = q["question"]
 
-        topic = map_topic(q["question_text"])
+        ans = ms_dict.get(q_no, {}).get("answer", "")
 
         result.append({
             "question": q_no,
             "question_text": q["question_text"],
-            "answer": ans,
-            "topic": topic
+            "answer": ans
         })
 
     return result
-
 
 # ---------- SAVE TO SUPABASE ----------
 def save_to_db(data, paper_name):
