@@ -35,28 +35,46 @@ document.getElementById("uploadForm").onsubmit = async function(e) {
 
     let formData = new FormData(this);
 
+   
     let res = await fetch("/upload", {
-        method: "POST",
-        body: formData
+    method: "POST",
+    body: formData
     });
+
+   if (!res.ok) {
+      let text = await res.text();
+      console.error("Server Error:", text);
+      alert("Upload failed");
+      return;
+     }
+
 
     let data = await res.json();
 
+    console.log(data);
+
     let table = document.querySelector("#resultTable tbody");
+
+    if (!table) {
+        console.log("Table not found ❌");
+        return;
+    }
+
     table.innerHTML = "";
 
     data.forEach(row => {
-        let tr = `
-            <tr>
-                <td>${row.question}</td>
-                <td>${row.question_text}</td>
-                <td>${row.answer}</td>
-                <td>${row.topic}</td>
-            </tr>
+        let tr = document.createElement("tr");
+
+        tr.innerHTML = `
+            <td>${row.question}</td>
+            <td>${row.question_text}</td>
+            <td>${row.answer}</td>
+            <td>${row.topic}</td>
         `;
-        table.innerHTML += tr;
+
+        table.appendChild(tr);
     });
-}
+};
 </script>
 
 </body>

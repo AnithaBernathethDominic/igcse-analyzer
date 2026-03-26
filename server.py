@@ -32,28 +32,43 @@ def extract_text(file):
 # ---------- PARSE QUESTION PAPER ----------
 def parse_qp(text):
     questions = []
-    pattern = r"(\d+\s*\([a-z]\))"
-    parts = re.split(pattern, text)
 
-    for i in range(1, len(parts), 2):
-        questions.append({
-            "question": parts[i].strip(),
-            "question_text": parts[i + 1].strip()
-        })
+    lines = text.split("\n")
+    current_q = None
+
+    for line in lines:
+        line = line.strip()
+
+        # Match main question number (1, 2, 3...)
+        if re.match(r"^\d+\s", line):
+            current_q = re.match(r"^\d+", line).group()
+
+        # Match sub-question (a), (b), etc.
+        elif re.match(r"^\([a-z]\)", line) and current_q:
+            sub_q = re.match(r"\([a-z]\)", line).group()
+            q_no = f"{current_q}{sub_q}"
+
+            questions.append({
+                "question": q_no,
+                "question_text": line
+            })
+
     return questions
-
 
 # ---------- PARSE MARK SCHEME ----------
 def parse_ms(text):
     answers = []
-    pattern = r"(\d+\([a-z]\))"
-    parts = re.split(pattern, text)
 
-    for i in range(1, len(parts), 2):
-        answers.append({
-            "question": parts[i].strip(),
-            "answer": parts[i + 1].strip()
-        })
+    lines = text.split("\n")
+
+    for line in lines:
+        match = re.match(r"^\d+\([a-z]\)", line.strip())
+        if match:
+            answers.append({
+                "question": match.group(),
+                "answer": line
+            })
+
     return answers
 
 
@@ -68,12 +83,14 @@ def map_topic(text):
 
 # ---------- MERGE ----------
 def merge(qp, ms):
-    ms_dict = {item["question"]: item for item in ms}
+    ms_dict = {item["question"].replace(" ", ""): item for item in ms}
     result = []
 
     for q in qp:
-        q_no = q["question"]
+        q_no = q["question"].replace(" ", "")
+
         ans = ms_dict.get(q_no, {}).get("answer", "")
+
         topic = map_topic(q["question_text"])
 
         result.append({
@@ -91,7 +108,7 @@ def save_to_db(data, paper_name):
     for item in data:
         supabase.table("questions").insert({
             "paper": paper_name,
-            "question": item["question"],
+            "question_no": item["question"],   # ✅ FIXED
             "question_text": item["question_text"],
             "answer": item["answer"],
             "topic": item["topic"]
@@ -106,24 +123,30 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    qp_file = request.files["qp"]
-    ms_file = request.files["ms"]
+    try:
+        qp_file = request.files["qp"]
+        ms_file = request.files["ms"]
 
-    paper_name = qp_file.filename
+        paper_name = qp_file.filename
 
-    qp_text = extract_text(qp_file)
-    ms_text = extract_text(ms_file)
+        qp_text = extract_text(qp_file)
+        ms_text = extract_text(ms_file)
 
-    qp_data = parse_qp(qp_text)
-    ms_data = parse_ms(ms_text)
+        qp_data = parse_qp(qp_text)
+        ms_data = parse_ms(ms_text)
 
-    final_data = merge(qp_data, ms_data)
+        print("QP DATA:", qp_data)
+        print("MS DATA:", ms_data)
 
-    # SAVE TO CLOUD
-    save_to_db(final_data, paper_name)
+        final_data = merge(qp_data, ms_data)
 
-    return jsonify(final_data)
+        save_to_db(final_data, paper_name)
 
+        return jsonify(final_data)
+
+    except Exception as e:
+        print("ERROR:", str(e))   
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/get_all")
 def get_all():
