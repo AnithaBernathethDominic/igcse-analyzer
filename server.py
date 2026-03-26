@@ -41,6 +41,21 @@ def parse_qp(text):
     for line in lines:
         line = line.strip()
 
+        # 🚫 SKIP NOISE
+        if (
+            line == "" or
+            "DO NOT WRITE" in line or
+            "Working space" in line or
+            re.match(r"^\.+$", line) or   # dotted lines
+            re.match(r"^\[\d+\]$", line) or  # marks like [2]
+            len(line) < 3
+        ):
+            continue
+
+        # Remove weird barcode garbage
+        if any(char in line for char in ["*", "¬", "Ĭ", "ĥ", "¥"]):
+            continue
+
         # Detect main question number
         if re.match(r"^\d+\s", line):
             current_q = re.match(r"^\d+", line).group()
@@ -51,13 +66,13 @@ def parse_qp(text):
             if current_q and current_sub and current_text:
                 questions.append({
                     "question": f"{current_q}{current_sub}",
-                    "question_text": current_text.strip()
+                    "question_text": clean_text(current_text)
                 })
 
             current_sub = re.match(r"\([a-z]\)", line).group()
-            current_text = line  # start new question block
+            current_text = line
 
-        # CONTINUE SAME QUESTION (multi-line)
+        # Continue same question
         elif current_sub:
             current_text += " " + line
 
@@ -65,11 +80,23 @@ def parse_qp(text):
     if current_q and current_sub and current_text:
         questions.append({
             "question": f"{current_q}{current_sub}",
-            "question_text": current_text.strip()
+            "question_text": clean_text(current_text)
         })
 
     return questions
 
+#ADD CLEANING FUNCTION
+def clean_text(text):
+    # Remove marks like [2], [4]
+    text = re.sub(r"\[\d+\]", "", text)
+
+    # Remove extra dots
+    text = re.sub(r"\.+", "", text)
+
+    # Remove extra spaces
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
 
 # ---------- PARSE MARK SCHEME ----------
 def parse_ms(text):
