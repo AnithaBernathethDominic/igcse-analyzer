@@ -1,29 +1,88 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Practice</title>
+    <title>IGCSE Practice</title>
+    <style>
+        body {
+            font-family: Arial;
+            background: #f4f6f8;
+            padding: 30px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            text-align: center;
+        }
+
+        select, button, textarea {
+            padding: 10px;
+            margin: 10px 5px;
+            font-size: 14px;
+        }
+
+        textarea {
+            width: 100%;
+            height: 80px;
+        }
+
+        #questionBox {
+            background: #eef2ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        #feedbackBox {
+            margin-top: 15px;
+            padding: 10px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+
+        .btn {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+
+        .btn:hover {
+            background: #4338ca;
+        }
+    </style>
 </head>
+
 <body>
 
-<h2>Select Topic</h2>
+<div class="container">
 
-<select id="topicSelect"></select>
-<button onclick="loadQuestions()">Start Practice</button>
+    <h2>IGCSE Practice</h2>
 
-<hr>
+    <select id="topicSelect"></select>
+    <button class="btn" onclick="loadQuestions()">Start Practice</button>
 
-<div id="questionBox"></div>
+    <div id="questionBox">Select a topic to begin</div>
 
-<button onclick="showAnswer()">Show Answer</button>
-<p id="answerBox"></p>
+    <textarea id="studentAnswer" placeholder="Type your answer here..."></textarea>
 
-<button onclick="nextQuestion()">Next</button>
+    <br>
 
-<textarea id="studentAnswer" placeholder="Type your answer here..."></textarea>
+    <button class="btn" onclick="checkAnswer()">Check Answer</button>
+    <button class="btn" onclick="showAnswer()">Show Answer</button>
+    <button class="btn" onclick="nextQuestion()">Next</button>
 
-<button onclick="checkAnswer()">Check Answer</button>
+    <div id="feedbackBox"></div>
 
-<div id="feedbackBox"></div>
+</div>
 
 <script>
 let questions = [];
@@ -49,19 +108,30 @@ async function loadQuestions() {
     let res = await fetch(`/practice/${topic}`);
     questions = await res.json();
 
+    console.log("Questions:", questions);
+
     current = 0;
     showQuestion();
 }
 
 function showQuestion() {
+    if (questions.length === 0) {
+        document.getElementById("questionBox").innerText = "No questions found";
+        return;
+    }
+
     let q = questions[current];
 
-    document.getElementById("questionBox").innerText = q.question_text;
-    document.getElementById("answerBox").innerText = "";
+    document.getElementById("questionBox").innerText =
+        q.question_no + " " + q.question_text;
+
+    document.getElementById("studentAnswer").value = "";
+    document.getElementById("feedbackBox").innerHTML = "";
 }
 
 function showAnswer() {
-    document.getElementById("answerBox").innerText = questions[current].answer;
+    document.getElementById("feedbackBox").innerHTML =
+        "<b>Model Answer:</b><br>" + questions[current].answer;
 }
 
 function nextQuestion() {
@@ -72,6 +142,7 @@ function nextQuestion() {
         alert("Finished!");
     }
 }
+
 async function checkAnswer() {
     let studentAnswer = document.getElementById("studentAnswer").value;
     let correctAnswer = questions[current].answer;
@@ -90,22 +161,10 @@ async function checkAnswer() {
     let data = await res.json();
 
     document.getElementById("feedbackBox").innerHTML = `
-        <h3>Evaluation</h3>
-
-        <p><b>Your Answer (Highlighted):</b><br>${data.highlighted}</p>
-
+        <p><b>Your Answer:</b><br>${data.highlighted}</p>
         <p><b>Marks:</b> ${data.marks}</p>
-
-        <p><b>Matched Keywords:</b> ${data.matched.join(", ")}</p>
-
-        <p><b>Missing Keywords:</b> 
-        <span style="color:red">${data.missing.join(", ")}</span></p>
-
-        <p><b>Examiner Comment:</b> ${data.comment}</p>
-
-        <hr>
-
-        <p><b>Model Answer:</b><br>${data.model}</p>
+        <p><b>Missing:</b> <span style="color:red">${data.missing.join(", ")}</span></p>
+        <p><b>Comment:</b> ${data.comment}</p>
     `;
 }
 
