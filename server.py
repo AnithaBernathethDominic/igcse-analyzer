@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify
+from flask import request
 import pdfplumber
 import re
 import json
@@ -139,3 +140,61 @@ def get_by_topic(topic):
 # ---------- RUN ----------
 if __name__ == "__main__":
     app.run(debug=True)
+
+ @app.route("/topics")
+def get_topics():
+    response = supabase.table("questions").select("topic").execute()
+
+    topics = list(set([item["topic"] for item in response.data]))
+
+    return jsonify(topics)
+
+@app.route("/practice/<topic>")
+def practice(topic):
+    response = supabase.table("questions").select("*").eq("topic", topic).execute()
+    return jsonify(response.data)
+
+@app.route("/practice")
+def practice_page():
+    return render_template("practice.html")
+
+
+@app.route("/feedback", methods=["POST"])
+def feedback():
+    data = request.json
+
+    student = data.get("student", "").lower()
+    correct = data.get("correct", "").lower()
+
+    # Extract keywords
+    keywords = list(set([word for word in correct.split() if len(word) > 4]))
+
+    matched = [k for k in keywords if k in student]
+    missing = [k for k in keywords if k not in student]
+
+    # Mark calculation
+    total = len(keywords)
+    score = len(matched)
+    marks = min(4, round((score / total) * 4)) if total > 0 else 0
+
+    # Highlight student answer
+    highlighted = student
+    for word in matched:
+        highlighted = highlighted.replace(word, f"<span style='color:green;font-weight:bold'>{word}</span>")
+
+    # Feedback comment
+    if marks == 4:
+        comment = "Excellent answer. Accurate use of key terminology."
+    elif marks >= 2:
+        comment = "Good attempt. Some key terms missing."
+    else:
+        comment = "Basic response. Needs improvement."
+
+    return jsonify({
+        "marks": f"{marks}/4",
+        "matched": matched[:5],
+        "missing": missing[:5],
+        "comment": comment,
+        "highlighted": highlighted,
+        "model": correct
+    })

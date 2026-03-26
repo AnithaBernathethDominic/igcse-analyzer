@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Practice</title>
+</head>
+<body>
+
+<h2>Select Topic</h2>
+
+<select id="topicSelect"></select>
+<button onclick="loadQuestions()">Start Practice</button>
+
+<hr>
+
+<div id="questionBox"></div>
+
+<button onclick="showAnswer()">Show Answer</button>
+<p id="answerBox"></p>
+
+<button onclick="nextQuestion()">Next</button>
+
+<textarea id="studentAnswer" placeholder="Type your answer here..."></textarea>
+
+<button onclick="checkAnswer()">Check Answer</button>
+
+<div id="feedbackBox"></div>
+
+<script>
+let questions = [];
+let current = 0;
+
+async function loadTopics() {
+    let res = await fetch("/topics");
+    let data = await res.json();
+
+    let select = document.getElementById("topicSelect");
+
+    data.forEach(t => {
+        let opt = document.createElement("option");
+        opt.value = t;
+        opt.innerText = t;
+        select.appendChild(opt);
+    });
+}
+
+async function loadQuestions() {
+    let topic = document.getElementById("topicSelect").value;
+
+    let res = await fetch(`/practice/${topic}`);
+    questions = await res.json();
+
+    current = 0;
+    showQuestion();
+}
+
+function showQuestion() {
+    let q = questions[current];
+
+    document.getElementById("questionBox").innerText = q.question_text;
+    document.getElementById("answerBox").innerText = "";
+}
+
+function showAnswer() {
+    document.getElementById("answerBox").innerText = questions[current].answer;
+}
+
+function nextQuestion() {
+    current++;
+    if (current < questions.length) {
+        showQuestion();
+    } else {
+        alert("Finished!");
+    }
+}
+async function checkAnswer() {
+    let studentAnswer = document.getElementById("studentAnswer").value;
+    let correctAnswer = questions[current].answer;
+
+    let res = await fetch("/feedback", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            student: studentAnswer,
+            correct: correctAnswer
+        })
+    });
+
+    let data = await res.json();
+
+    document.getElementById("feedbackBox").innerHTML = `
+        <h3>Evaluation</h3>
+
+        <p><b>Your Answer (Highlighted):</b><br>${data.highlighted}</p>
+
+        <p><b>Marks:</b> ${data.marks}</p>
+
+        <p><b>Matched Keywords:</b> ${data.matched.join(", ")}</p>
+
+        <p><b>Missing Keywords:</b> 
+        <span style="color:red">${data.missing.join(", ")}</span></p>
+
+        <p><b>Examiner Comment:</b> ${data.comment}</p>
+
+        <hr>
+
+        <p><b>Model Answer:</b><br>${data.model}</p>
+    `;
+}
+
+loadTopics();
+</script>
+
+</body>
+</html>
