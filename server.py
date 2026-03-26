@@ -59,8 +59,12 @@ def parse_qp(text):
         if re.match(r"^[0-9A-F]+$", line):
             continue
 
-        # ✅ REAL question start (VERY IMPORTANT FIX)
-        if re.match(r"^\d+\s+[A-Z]", line):
+        #  REAL question start (VERY IMPORTANT FIX)
+        if re.match(r"^[0-9A-F]+$", line):
+            continue
+
+        # ✅ detect main question number (FIXED VERSION)
+        if re.match(r"^\d+\b", line) and len(line) > 5:
             current_q = re.match(r"^\d+", line).group()
 
         # ✅ sub-question
