@@ -35,23 +35,38 @@ def parse_qp(text):
 
     lines = text.split("\n")
     current_q = None
+    current_sub = None
+    current_text = ""
 
     for line in lines:
         line = line.strip()
 
-        # Main question number
+        # Detect main question number
         if re.match(r"^\d+\s", line):
             current_q = re.match(r"^\d+", line).group()
 
-        # Sub-question
-        elif re.match(r"^\([a-z]\)", line) and current_q:
-            sub_q = re.match(r"\([a-z]\)", line).group()
-            q_no = f"{current_q}{sub_q}"
+        # Detect sub-question (a), (b), (c)
+        elif re.match(r"^\([a-z]\)", line):
+            # Save previous question
+            if current_q and current_sub and current_text:
+                questions.append({
+                    "question": f"{current_q}{current_sub}",
+                    "question_text": current_text.strip()
+                })
 
-            questions.append({
-                "question": q_no,
-                "question_text": line
-            })
+            current_sub = re.match(r"\([a-z]\)", line).group()
+            current_text = line  # start new question block
+
+        # CONTINUE SAME QUESTION (multi-line)
+        elif current_sub:
+            current_text += " " + line
+
+    # Add last question
+    if current_q and current_sub and current_text:
+        questions.append({
+            "question": f"{current_q}{current_sub}",
+            "question_text": current_text.strip()
+        })
 
     return questions
 
