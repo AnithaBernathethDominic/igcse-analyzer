@@ -1,13 +1,15 @@
 from flask import Flask, render_template, request, jsonify
+from flask import request
+import pdfplumber
 import re
 import json
-import os
-import fitz  # PyMuPDF
 from supabase import create_client
 
 app = Flask(__name__)
 
 # ---------- SUPABASE CONFIG ----------
+import os
+
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
@@ -18,14 +20,12 @@ with open("topics.json") as f:
     TOPICS = json.load(f)
 
 
-# ---------- EXTRACT TEXT FROM PDF ----------
+# ---------- EXTRACT TEXT ----------
 def extract_text(file):
     text = ""
-    pdf = fitz.open(stream=file.read(), filetype="pdf")
-
-    for page in pdf:
-        text += page.get_text()
-
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            text += (page.extract_text() or "") + "\n"
     return text
 
 
@@ -39,11 +39,11 @@ def parse_qp(text):
     for line in lines:
         line = line.strip()
 
-        # Main question number
+        # Match main question number (1, 2, 3...)
         if re.match(r"^\d+\s", line):
             current_q = re.match(r"^\d+", line).group()
 
-        # Sub-question
+        # Match sub-question (a), (b), etc.
         elif re.match(r"^\([a-z]\)", line) and current_q:
             sub_q = re.match(r"\([a-z]\)", line).group()
             q_no = f"{current_q}{sub_q}"
@@ -55,25 +55,19 @@ def parse_qp(text):
 
     return questions
 
-
 # ---------- PARSE MARK SCHEME ----------
 def parse_ms(text):
     answers = []
 
-    pattern = r"\d+\([a-z]\)"
-    matches = list(re.finditer(pattern, text))
+    lines = text.split("\n")
 
-    for i in range(len(matches)):
-        start = matches[i].start()
-        end = matches[i+1].start() if i+1 < len(matches) else len(text)
-
-        a_text = text[start:end]
-        q_no = matches[i].group()
-
-        answers.append({
-            "question": q_no,
-            "answer": a_text.strip()
-        })
+    for line in lines:
+        match = re.match(r"^\d+\([a-z]\)", line.strip())
+        if match:
+            answers.append({
+                "question": match.group(),
+                "answer": line
+            })
 
     return answers
 
@@ -87,13 +81,14 @@ def map_topic(text):
     return "General"
 
 
-# ---------- MERGE QP + MS ----------
+# ---------- MERGE ----------
 def merge(qp, ms):
     ms_dict = {item["question"].replace(" ", ""): item for item in ms}
     result = []
 
     for q in qp:
         q_no = q["question"].replace(" ", "")
+
         ans = ms_dict.get(q_no, {}).get("answer", "")
 
         topic = map_topic(q["question_text"])
@@ -113,9 +108,9 @@ def save_to_db(data, paper_name):
     for item in data:
         supabase.table("questions").insert({
             "paper": paper_name,
-            "question_no": item["question"],
+            "question_no": item["question"],   # ✅ FIXED
             "question_text": item["question_text"],
-            "answer": item.get("answer", ""),
+            "answer": item["answer"],
             "topic": item["topic"]
         }).execute()
 
@@ -124,11 +119,6 @@ def save_to_db(data, paper_name):
 @app.route("/")
 def index():
     return render_template("index.html")
-
-
-@app.route("/practice")
-def practice_page():
-    return render_template("practice.html")
 
 
 @app.route("/upload", methods=["POST"])
@@ -155,26 +145,43 @@ def upload():
         return jsonify(final_data)
 
     except Exception as e:
-        print("ERROR:", str(e))
+        print("ERROR:", str(e))   
         return jsonify({"error": str(e)}), 500
 
+@app.route("/get_all")
+def get_all():
+    response = supabase.table("questions").select("*").execute()
+    return jsonify(response.data)
 
-# ---------- GET TOPICS ----------
-@app.route("/topics")
+
+@app.route("/topic/<topic>")
+def get_by_topic(topic):
+    response = supabase.table("questions").select("*").eq("topic", topic).execute()
+    return jsonify(response.data)
+
+
+# ---------- RUN ----------
+if __name__ == "__main__":
+    app.run(debug=True)
+
+ @app.route("/topics")
 def get_topics():
     response = supabase.table("questions").select("topic").execute()
+
     topics = list(set([item["topic"] for item in response.data]))
+
     return jsonify(topics)
 
-
-# ---------- PRACTICE ----------
 @app.route("/practice/<topic>")
 def practice(topic):
     response = supabase.table("questions").select("*").eq("topic", topic).execute()
     return jsonify(response.data)
 
+@app.route("/practice")
+def practice_page():
+    return render_template("practice.html")
 
-# ---------- AI FEEDBACK (IGCSE STYLE) ----------
+
 @app.route("/feedback", methods=["POST"])
 def feedback():
     data = request.json
@@ -182,25 +189,23 @@ def feedback():
     student = data.get("student", "").lower()
     correct = data.get("correct", "").lower()
 
+    # Extract keywords
     keywords = list(set([word for word in correct.split() if len(word) > 4]))
 
     matched = [k for k in keywords if k in student]
     missing = [k for k in keywords if k not in student]
 
+    # Mark calculation
     total = len(keywords)
     score = len(matched)
-
     marks = min(4, round((score / total) * 4)) if total > 0 else 0
 
-    # Highlight matched words
+    # Highlight student answer
     highlighted = student
     for word in matched:
-        highlighted = highlighted.replace(
-            word,
-            f"<span style='color:green;font-weight:bold'>{word}</span>"
-        )
+        highlighted = highlighted.replace(word, f"<span style='color:green;font-weight:bold'>{word}</span>")
 
-    # Comment
+    # Feedback comment
     if marks == 4:
         comment = "Excellent answer. Accurate use of key terminology."
     elif marks >= 2:
@@ -216,8 +221,3 @@ def feedback():
         "highlighted": highlighted,
         "model": correct
     })
-
-
-# ---------- RUN ----------
-if __name__ == "__main__":
-    app.run(debug=True)
