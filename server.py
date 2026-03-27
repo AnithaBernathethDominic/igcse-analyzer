@@ -71,8 +71,14 @@ def parse_qp(text):
             continue
 
         # ✅ detect REAL question number (FIXED)
-        if re.match(r"^\d+\s+[A-Za-z]", line):
-            current_q = re.match(r"^\d+", line).group()
+        match_q = re.match(r"^(\d+)\s+[A-Za-z]", line)
+
+        if match_q:
+           q_num = match_q.group(1)
+
+           # ✅ only update if new question
+           if q_num != current_q:
+              current_q = q_num
 
         # ✅ detect sub-question
         elif re.match(r"^\([a-z]\)", line):
@@ -88,7 +94,23 @@ def parse_qp(text):
 
         # ✅ continue same question
         elif current_sub:
-            current_text += " " + line
+
+            # 🔥 detect (i), (ii), (iii)
+            if re.match(r"^\([ivx]+\)", line):
+
+                # save previous
+                if current_text:
+                    questions.append({
+                        "question": f"{current_q}{current_sub}",
+                        "question_text": clean_text(current_text)
+                    })
+
+               # start new sub-sub question
+               current_sub = re.match(r"\([ivx]+\)", line).group()
+               current_text = line
+
+          else:
+              current_text += " " + line
 
     # ✅ last question
     if current_q and current_sub and current_text:
@@ -101,13 +123,17 @@ def parse_qp(text):
     
 #ADD CLEANING FUNCTION
 def clean_text(text):
-    # Remove marks like [2], [4]
+    # remove UCLES / footer junk
+    text = re.sub(r"©.*?2025", "", text)
+    text = re.sub(r"\[Turn over\]", "", text)
+
+    # remove marks like [2]
     text = re.sub(r"\[\d+\]", "", text)
 
-    # Remove extra dots
+    # remove dots
     text = re.sub(r"\.+", "", text)
 
-    # Remove extra spaces
+    # remove extra spaces
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
