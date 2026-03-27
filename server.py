@@ -40,36 +40,13 @@ def parse_qp(text):
 
     for line in lines:
         line = line.strip()
-      
+
+        # 🚫 skip empty
         if line == "":
-          continue
-        # 🚫 skip paper codes like 0478/12/O/N/25
-        if re.match(r"^0\d{3}", line):
             continue
-        # 🚫 skip binary / hex junk
-        if re.match(r"^[0-9A-F]+$", line):
-            continue
-    
-        # 🚫 skip paper codes
-       if re.match(r"^0\d{3}", line):
-           continue
 
-       # 🚫 skip binary
-       if re.match(r"^[01]{6,}$", line):
-          continue
-
-       # 🚫 skip hex-only lines
-      if re.match(r"^[0-9A-F]+$", line):
-         continue
-
-      # ✅ detect REAL question number
-      if re.match(r"^\d+\s+[A-Za-z]", line):
-         current_q = re.match(r"^\d+", line).group()
-
-            
-        # 🚫 SKIP NOISE
+        # 🚫 skip noise
         if (
-            line == "" or
             "DO NOT WRITE" in line or
             "Working space" in line or
             re.match(r"^\.+$", line) or
@@ -77,23 +54,27 @@ def parse_qp(text):
         ):
             continue
 
-        # 🚫 Skip garbage
+        # 🚫 skip paper codes (0478 etc)
+        if re.match(r"^0\d{3}", line):
+            continue
+
+        # 🚫 skip binary numbers
+        if re.match(r"^[01]{6,}$", line):
+            continue
+
+        # 🚫 skip hex-only lines
+        if re.match(r"^[0-9A-F]+$", line):
+            continue
+
+        # 🚫 skip garbage characters
         if any(char in line for char in ["*", "¬", "Ĭ", "ĥ", "¥"]):
             continue
 
-        # 🚫 Skip lines that are just numbers or binary
-        if re.match(r"^[0-9A-F]+$", line):
-            continue
-
-        #  REAL question start (VERY IMPORTANT FIX)
-        if re.match(r"^[0-9A-F]+$", line):
-            continue
-
-        # ✅ detect main question number (FIXED VERSION)
-        if re.match(r"^\d+\b", line) and len(line) > 5:
+        # ✅ detect REAL question number (FIXED)
+        if re.match(r"^\d+\s+[A-Za-z]", line):
             current_q = re.match(r"^\d+", line).group()
 
-        # ✅ sub-question
+        # ✅ detect sub-question
         elif re.match(r"^\([a-z]\)", line):
 
             if current_q and current_sub and current_text:
@@ -105,11 +86,11 @@ def parse_qp(text):
             current_sub = re.match(r"\([a-z]\)", line).group()
             current_text = line
 
-        # ✅ continue question
+        # ✅ continue same question
         elif current_sub:
             current_text += " " + line
 
-    # last question
+    # ✅ last question
     if current_q and current_sub and current_text:
         questions.append({
             "question": f"{current_q}{current_sub}",
@@ -117,7 +98,7 @@ def parse_qp(text):
         })
 
     return questions
-
+    
 #ADD CLEANING FUNCTION
 def clean_text(text):
     # Remove marks like [2], [4]
