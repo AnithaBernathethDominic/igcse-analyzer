@@ -156,12 +156,12 @@ def merge(qp, ms):
 
         ans = ms_dict.get(q_no, {}).get("answer", "")
 
-       result.append({
+        result.append({
             "question": q_no,
             "question_text": q["question_text"],
             "answer": ans,
             "topic": map_topic(q["question_text"])   # ✅ ADD THIS
-        })
+       })
 
     return result
 
