@@ -70,17 +70,16 @@ def parse_qp(text):
         if any(char in line for char in ["*", "¬", "Ĭ", "ĥ", "¥"]):
             continue
 
-        # ✅ detect REAL question number (FIXED)
+        # ✅ detect REAL question number
         match_q = re.match(r"^(\d+)\s+[A-Za-z]", line)
-
         if match_q:
-           q_num = match_q.group(1)
+            q_num = match_q.group(1)
 
-           # ✅ only update if new question
-           if q_num != current_q:
-              current_q = q_num
+            # update only if new question
+            if q_num != current_q:
+                current_q = q_num
 
-        # ✅ detect sub-question
+        # ✅ detect (a), (b), (c)
         elif re.match(r"^\([a-z]\)", line):
 
             if current_q and current_sub and current_text:
@@ -92,25 +91,24 @@ def parse_qp(text):
             current_sub = re.match(r"\([a-z]\)", line).group()
             current_text = line
 
-        # ✅ continue same question
+        # ✅ continue question OR detect (i), (ii), (iii)
         elif current_sub:
 
             # 🔥 detect (i), (ii), (iii)
             if re.match(r"^\([ivx]+\)", line):
 
-                # save previous
-                if current_text:
+                if current_q and current_sub and current_text:
                     questions.append({
                         "question": f"{current_q}{current_sub}",
                         "question_text": clean_text(current_text)
                     })
 
-               # start new sub-sub question
-               current_sub = re.match(r"\([ivx]+\)", line).group()
-               current_text = line
+                # start new sub-sub
+                current_sub = re.match(r"\([ivx]+\)", line).group()
+                current_text = line
 
-          else:
-              current_text += " " + line
+            else:
+                current_text += " " + line
 
     # ✅ last question
     if current_q and current_sub and current_text:
