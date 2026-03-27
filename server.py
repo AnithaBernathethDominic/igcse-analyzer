@@ -41,6 +41,12 @@ def parse_qp(text):
     for line in lines:
         line = line.strip()
 
+        # 🚫 skip paper codes like 0478/12/O/N/25
+        if re.match(r"^0\d{3}", line):
+            continue
+        # 🚫 skip binary / hex junk
+        if re.match(r"^[0-9A-F]+$", line):
+            continue
         # 🚫 SKIP NOISE
         if (
             line == "" or
@@ -150,10 +156,11 @@ def merge(qp, ms):
 
         ans = ms_dict.get(q_no, {}).get("answer", "")
 
-        result.append({
+       result.append({
             "question": q_no,
             "question_text": q["question_text"],
-            "answer": ans
+            "answer": ans,
+            "topic": map_topic(q["question_text"])   # ✅ ADD THIS
         })
 
     return result
@@ -166,7 +173,7 @@ def save_to_db(data, paper_name):
             "question_no": item["question"],
             "question_text": item["question_text"],
             "answer": item.get("answer", ""),
-            "topic": item["topic"]
+            "topic": item.get("topic", "General")
         }).execute()
 
 
