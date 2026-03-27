@@ -40,13 +40,33 @@ def parse_qp(text):
 
     for line in lines:
         line = line.strip()
-
+      
+        if line == "":
+          continue
         # 🚫 skip paper codes like 0478/12/O/N/25
         if re.match(r"^0\d{3}", line):
             continue
         # 🚫 skip binary / hex junk
         if re.match(r"^[0-9A-F]+$", line):
             continue
+    
+        # 🚫 skip paper codes
+       if re.match(r"^0\d{3}", line):
+           continue
+
+       # 🚫 skip binary
+       if re.match(r"^[01]{6,}$", line):
+          continue
+
+       # 🚫 skip hex-only lines
+      if re.match(r"^[0-9A-F]+$", line):
+         continue
+
+      # ✅ detect REAL question number
+      if re.match(r"^\d+\s+[A-Za-z]", line):
+         current_q = re.match(r"^\d+", line).group()
+
+            
         # 🚫 SKIP NOISE
         if (
             line == "" or
