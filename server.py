@@ -18,7 +18,7 @@ with open("topics.json") as f:
     TOPICS = json.load(f)
 
 
-# ---------- EXTRACT TEXT FROM PDF ----------
+# ---------- EXTRACT TEXT ----------
 def extract_text(file):
     text = ""
     pdf = fitz.open(stream=file.read(), filetype="pdf")
@@ -27,6 +27,18 @@ def extract_text(file):
         text += page.get_text()
 
     return text
+
+
+# ---------- CLEAN TEXT ----------
+def clean_text(text):
+    text = re.sub(r"©.*?2025", "", text)
+    text = re.sub(r"UCLES.*", "", text)
+    text = re.sub(r"\[Turn over\]", "", text)
+    text = re.sub(r"[^\x00-\x7F]+", " ", text)
+    text = re.sub(r"\[\d+\]", "", text)
+    text = re.sub(r"\.+", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 # ---------- PARSE QUESTION PAPER ----------
@@ -41,7 +53,6 @@ def parse_qp(text):
     for line in lines:
         line = line.strip()
 
-        # 🚫 skip empty
         if line == "":
             continue
 
@@ -54,32 +65,29 @@ def parse_qp(text):
         ):
             continue
 
-        # 🚫 skip paper codes (0478 etc)
-        if re.match(r"^0\d{3}", line):
+        # 🚫 skip garbage numbers
+        if re.match(r"^\d{5,}$", line):
             continue
 
-        # 🚫 skip binary numbers
         if re.match(r"^[01]{6,}$", line):
             continue
 
-        # 🚫 skip hex-only lines
         if re.match(r"^[0-9A-F]+$", line):
             continue
 
-        # 🚫 skip garbage characters
-        if any(char in line for char in ["*", "¬", "Ĭ", "ĥ", "¥"]):
-            continue
-
-        # ✅ detect REAL question number
+        # ✅ detect question number (IMPORTANT FIX)
         match_q = re.match(r"^(\d+)\s+[A-Za-z]", line)
-        if match_q:
-            q_num = match_q.group(1)
+        match_q_only = re.match(r"^(\d+)$", line)
 
-            # update only if new question
-            if q_num != current_q:
+        if match_q:
+            current_q = match_q.group(1)
+
+        elif match_q_only:
+            q_num = match_q_only.group(1)
+            if int(q_num) <= 20:
                 current_q = q_num
 
-        # ✅ detect (a), (b), (c)
+        # ✅ detect (a)(b)(c)
         elif re.match(r"^\([a-z]\)", line):
 
             if current_q and current_sub and current_text:
@@ -91,10 +99,9 @@ def parse_qp(text):
             current_sub = re.match(r"\([a-z]\)", line).group()
             current_text = line
 
-        # ✅ continue question OR detect (i), (ii), (iii)
+        # ✅ detect (i)(ii)(iii)
         elif current_sub:
 
-            # 🔥 detect (i), (ii), (iii)
             if re.match(r"^\([ivx]+\)", line):
 
                 if current_q and current_sub and current_text:
@@ -103,38 +110,26 @@ def parse_qp(text):
                         "question_text": clean_text(current_text)
                     })
 
-                # start new sub-sub
                 current_sub = re.match(r"\([ivx]+\)", line).group()
                 current_text = line
 
             else:
                 current_text += " " + line
 
-    # ✅ last question
+    # last question
     if current_q and current_sub and current_text:
         questions.append({
             "question": f"{current_q}{current_sub}",
             "question_text": clean_text(current_text)
         })
 
-    return questions
-    
-#ADD CLEANING FUNCTION
-def clean_text(text):
-    # remove UCLES / footer junk
-    text = re.sub(r"©.*?2025", "", text)
-    text = re.sub(r"\[Turn over\]", "", text)
+    # 🚫 REMOVE DUPLICATES (FINAL FIX)
+    unique = {}
+    for q in questions:
+        unique[q["question"]] = q
 
-    # remove marks like [2]
-    text = re.sub(r"\[\d+\]", "", text)
+    return list(unique.values())
 
-    # remove dots
-    text = re.sub(r"\.+", "", text)
-
-    # remove extra spaces
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
 
 # ---------- PARSE MARK SCHEME ----------
 def parse_ms(text):
@@ -150,7 +145,6 @@ def parse_ms(text):
         block = text[start:end]
         q_no = matches[i].group()
 
-        # Clean answer text
         answer = re.sub(r"\s+", " ", block).strip()
 
         answers.append({
@@ -170,7 +164,7 @@ def map_topic(text):
     return "General"
 
 
-# ---------- MERGE QP + MS ----------
+# ---------- MERGE ----------
 def merge(qp, ms):
     ms_dict = {item["question"]: item for item in ms}
 
@@ -179,18 +173,27 @@ def merge(qp, ms):
     for q in qp:
         q_no = q["question"]
 
-        ans = ms_dict.get(q_no, {}).get("answer", "")
+        ans = ""
+
+        if q_no in ms_dict:
+            ans = ms_dict[q_no]["answer"]
+        else:
+            for key in ms_dict:
+                if key.startswith(q_no):
+                    ans = ms_dict[key]["answer"]
+                    break
 
         result.append({
             "question": q_no,
             "question_text": q["question_text"],
             "answer": ans,
-            "topic": map_topic(q["question_text"])   # ✅ ADD THIS
-       })
+            "topic": map_topic(q["question_text"])
+        })
 
     return result
 
-# ---------- SAVE TO SUPABASE ----------
+
+# ---------- SAVE ----------
 def save_to_db(data, paper_name):
     for item in data:
         supabase.table("questions").insert({
@@ -241,7 +244,6 @@ def upload():
         return jsonify({"error": str(e)}), 500
 
 
-# ---------- GET TOPICS ----------
 @app.route("/topics")
 def get_topics():
     response = supabase.table("questions").select("topic").execute()
@@ -249,14 +251,12 @@ def get_topics():
     return jsonify(topics)
 
 
-# ---------- PRACTICE ----------
 @app.route("/practice/<topic>")
 def practice(topic):
     response = supabase.table("questions").select("*").eq("topic", topic).execute()
     return jsonify(response.data)
 
 
-# ---------- AI FEEDBACK (IGCSE STYLE) ----------
 @app.route("/feedback", methods=["POST"])
 def feedback():
     data = request.json
@@ -274,7 +274,6 @@ def feedback():
 
     marks = min(4, round((score / total) * 4)) if total > 0 else 0
 
-    # Highlight matched words
     highlighted = student
     for word in matched:
         highlighted = highlighted.replace(
@@ -282,7 +281,6 @@ def feedback():
             f"<span style='color:green;font-weight:bold'>{word}</span>"
         )
 
-    # Comment
     if marks == 4:
         comment = "Excellent answer. Accurate use of key terminology."
     elif marks >= 2:
@@ -300,6 +298,5 @@ def feedback():
     })
 
 
-# ---------- RUN ----------
 if __name__ == "__main__":
     app.run(debug=True)
