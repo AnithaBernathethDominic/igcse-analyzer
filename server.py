@@ -22,10 +22,8 @@ with open("topics.json") as f:
 def extract_text(file):
     text = ""
     pdf = fitz.open(stream=file.read(), filetype="pdf")
-
     for page in pdf:
         text += page.get_text()
-
     return text
 
 
@@ -75,9 +73,18 @@ def parse_qp(text):
         if re.match(r"^[0-9A-F]+$", line):
             continue
 
-        # ✅ detect question number (IMPORTANT FIX)
+        # ===============================
+        # ✅ QUESTION NUMBER DETECTION (FINAL FIX)
+        # ===============================
+
+        # Case 1: "1 A toy..."
         match_q = re.match(r"^(\d+)\s+[A-Za-z]", line)
+
+        # Case 2: "2"
         match_q_only = re.match(r"^(\d+)$", line)
+
+        # Case 3: "2(a)" ⭐ IMPORTANT
+        match_q_inline = re.match(r"^(\d+)\([a-z]\)", line)
 
         if match_q:
             current_q = match_q.group(1)
@@ -87,7 +94,22 @@ def parse_qp(text):
             if int(q_num) <= 20:
                 current_q = q_num
 
-        # ✅ detect (a)(b)(c)
+        elif match_q_inline:
+            current_q = match_q_inline.group(1)
+
+            # save previous
+            if current_q and current_sub and current_text:
+                questions.append({
+                    "question": f"{current_q}{current_sub}",
+                    "question_text": clean_text(current_text)
+                })
+
+            current_sub = re.search(r"\([a-z]\)", line).group()
+            current_text = line
+
+        # ===============================
+        # ✅ (a)(b)(c)
+        # ===============================
         elif re.match(r"^\([a-z]\)", line):
 
             if current_q and current_sub and current_text:
@@ -99,7 +121,9 @@ def parse_qp(text):
             current_sub = re.match(r"\([a-z]\)", line).group()
             current_text = line
 
-        # ✅ detect (i)(ii)(iii)
+        # ===============================
+        # ✅ (i)(ii)(iii)
+        # ===============================
         elif current_sub:
 
             if re.match(r"^\([ivx]+\)", line):
@@ -123,7 +147,7 @@ def parse_qp(text):
             "question_text": clean_text(current_text)
         })
 
-    # 🚫 REMOVE DUPLICATES (FINAL FIX)
+    # 🚫 remove duplicates
     unique = {}
     for q in questions:
         unique[q["question"]] = q
@@ -167,16 +191,17 @@ def map_topic(text):
 # ---------- MERGE ----------
 def merge(qp, ms):
     ms_dict = {item["question"]: item for item in ms}
-
     result = []
 
     for q in qp:
         q_no = q["question"]
-
         ans = ""
 
+        # exact match
         if q_no in ms_dict:
             ans = ms_dict[q_no]["answer"]
+
+        # fallback match
         else:
             for key in ms_dict:
                 if key.startswith(q_no):
