@@ -51,33 +51,17 @@ def parse_qp(text):
     for line in lines:
         line = line.strip()
 
-        if line == "":
+        if not line:
             continue
 
-        # 🚫 skip noise
-        if (
-            "DO NOT WRITE" in line or
-            "Working space" in line or
-            re.match(r"^\.+$", line) or
-            re.match(r"^\[\d+\]$", line)
-        ):
-            continue
-
-        # 🚫 skip garbage numbers
-        if re.match(r"^\d{5,}$", line):
-            continue
-
-        if re.match(r"^[01]{6,}$", line):
-            continue
-
-        if re.match(r"^[0-9A-F]+$", line):
-            continue
+        # 🔥 NORMALIZE SPACES
+        line = re.sub(r"\s+", " ", line)
 
         # ===============================
-        # ✅ PRIORITY: detect question FIRST
+        # ✅ STEP 1: QUESTION DETECTION FIRST
         # ===============================
 
-        # Case: 2(a)
+        # Case 1: 2(a)
         match_inline = re.match(r"^(\d+)\(([a-z])\)", line)
         if match_inline:
 
@@ -90,20 +74,43 @@ def parse_qp(text):
             current_q = match_inline.group(1)
             current_sub = f"({match_inline.group(2)})"
             current_text = line
-            continue  # 🔥 CRITICAL
-
-        # Case: "2"
-        match_q_only = re.match(r"^(\d+)$", line)
-        if match_q_only:
-            q_num = match_q_only.group(1)
-            if int(q_num) <= 20:
-                current_q = q_num
             continue
 
-        # Case: "2 A computer..."
+        # Case 2: "2"
+        match_q_only = re.match(r"^(\d+)$", line)
+        if match_q_only:
+            q_num = int(match_q_only.group(1))
+
+            # only valid question numbers
+            if 1 <= q_num <= 20:
+                current_q = str(q_num)
+
+            continue
+
+        # Case 3: "2 A computer..."
         match_q = re.match(r"^(\d+)\s+[A-Za-z]", line)
         if match_q:
             current_q = match_q.group(1)
+            continue
+
+        # ===============================
+        # 🚫 FILTERS AFTER DETECTION
+        # ===============================
+
+        if (
+            "DO NOT WRITE" in line or
+            "Working space" in line or
+            re.match(r"^\.+$", line) or
+            re.match(r"^\[\d+\]$", line)
+        ):
+            continue
+
+        # skip binary
+        if re.match(r"^[01]{6,}$", line):
+            continue
+
+        # skip hex only
+        if re.match(r"^[0-9A-F]+$", line):
             continue
 
         # ===============================
@@ -153,8 +160,6 @@ def parse_qp(text):
         unique[q["question"]] = q
 
     return list(unique.values())
-
-
 # ---------- PARSE MARK SCHEME ----------
 def parse_ms(text):
     answers = []
