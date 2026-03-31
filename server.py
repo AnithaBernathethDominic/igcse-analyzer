@@ -74,43 +74,42 @@ def parse_qp(text):
             continue
 
         # ===============================
-        # ✅ QUESTION NUMBER DETECTION (FINAL FIX)
+        # ✅ PRIORITY: detect question FIRST
         # ===============================
 
-        # Case 1: "1 A toy..."
-        match_q = re.match(r"^(\d+)\s+[A-Za-z]", line)
+        # Case: 2(a)
+        match_inline = re.match(r"^(\d+)\(([a-z])\)", line)
+        if match_inline:
 
-        # Case 2: "2"
-        match_q_only = re.match(r"^(\d+)$", line)
-
-        # Case 3: "2(a)" ⭐ IMPORTANT
-        match_q_inline = re.match(r"^(\d+)\([a-z]\)", line)
-
-        if match_q:
-            current_q = match_q.group(1)
-
-        elif match_q_only:
-            q_num = match_q_only.group(1)
-            if int(q_num) <= 20:
-                current_q = q_num
-
-        elif match_q_inline:
-            current_q = match_q_inline.group(1)
-
-            # save previous
             if current_q and current_sub and current_text:
                 questions.append({
                     "question": f"{current_q}{current_sub}",
                     "question_text": clean_text(current_text)
                 })
 
-            current_sub = re.search(r"\([a-z]\)", line).group()
+            current_q = match_inline.group(1)
+            current_sub = f"({match_inline.group(2)})"
             current_text = line
+            continue  # 🔥 CRITICAL
+
+        # Case: "2"
+        match_q_only = re.match(r"^(\d+)$", line)
+        if match_q_only:
+            q_num = match_q_only.group(1)
+            if int(q_num) <= 20:
+                current_q = q_num
+            continue
+
+        # Case: "2 A computer..."
+        match_q = re.match(r"^(\d+)\s+[A-Za-z]", line)
+        if match_q:
+            current_q = match_q.group(1)
+            continue
 
         # ===============================
         # ✅ (a)(b)(c)
         # ===============================
-        elif re.match(r"^\([a-z]\)", line):
+        if re.match(r"^\([a-z]\)", line):
 
             if current_q and current_sub and current_text:
                 questions.append({
@@ -120,11 +119,12 @@ def parse_qp(text):
 
             current_sub = re.match(r"\([a-z]\)", line).group()
             current_text = line
+            continue
 
         # ===============================
         # ✅ (i)(ii)(iii)
         # ===============================
-        elif current_sub:
+        if current_sub:
 
             if re.match(r"^\([ivx]+\)", line):
 
@@ -147,7 +147,7 @@ def parse_qp(text):
             "question_text": clean_text(current_text)
         })
 
-    # 🚫 remove duplicates
+    # remove duplicates
     unique = {}
     for q in questions:
         unique[q["question"]] = q
@@ -197,11 +197,8 @@ def merge(qp, ms):
         q_no = q["question"]
         ans = ""
 
-        # exact match
         if q_no in ms_dict:
             ans = ms_dict[q_no]["answer"]
-
-        # fallback match
         else:
             for key in ms_dict:
                 if key.startswith(q_no):
