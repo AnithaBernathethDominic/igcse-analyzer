@@ -43,8 +43,7 @@ def clean_text(text):
 
 # ---------- PARSE QUESTION PAPER ----------
 def parse_qp(text):
-    import re
-
+   
     questions = []
 
     lines = text.split("\n")
@@ -58,32 +57,39 @@ def parse_qp(text):
         if not line:
             continue
 
-        # normalize
+        # normalize spaces
         line = re.sub(r"\s+", " ", line)
 
         # ===============================
-        # 🚫 STRONG FILTERS (VERY IMPORTANT)
+        # 🚫 REMOVE GARBAGE
         # ===============================
-
         if (
             "DO NOT WRITE" in line or
             "Working space" in line or
             "UCLES" in line or
-            "Turn over" in line or
-            re.match(r"^\*.*\*$", line)
+            "Turn over" in line
         ):
             continue
 
-        # skip long binary numbers
+        # skip long binary lines
         if re.match(r"^[01]{8,}$", line):
             continue
 
-        # skip hex-like garbage
+        # skip hex junk
         if re.match(r"^[0-9A-F]{6,}$", line):
             continue
 
         # ===============================
-        # ✅ CASE 1: FULL FORMAT → 2(a)
+        # ✅ MAIN QUESTION DETECTION (FIXED)
+        # ===============================
+        match_q = re.match(r"^(\d+)\s+[A-Z]", line)
+
+        if match_q:
+            current_q = match_q.group(1)
+            continue
+
+        # ===============================
+        # ✅ CASE: 2(a)
         # ===============================
         match_inline = re.match(r"^(\d+)\(([a-z])\)", line)
         if match_inline:
@@ -98,26 +104,6 @@ def parse_qp(text):
             current_sub = f"({match_inline.group(2)})"
             current_text = line
             continue
-
-        # ===============================
-        # ✅ CASE 2: PURE QUESTION NUMBER → "1"
-        # ===============================
-        match_q_only = re.match(r"^(\d+)$", line)
-        if match_q_only:
-            q_num = int(match_q_only.group(1))
-
-            # 🔥 STRICT VALID RANGE (prevents 3 from binary)
-            if 1 <= q_num <= 20:
-                current_q = str(q_num)
-
-            continue
-
-        # ===============================
-        # ❗ IMPORTANT: DO NOT update from normal lines
-        # ===============================
-        # REMOVE THIS TYPE OF LOGIC:
-        # match_q = re.match(r"^\d+\s+[A-Za-z]", line)
-        # ❌ THIS WAS BREAKING YOUR CODE
 
         # ===============================
         # ✅ SUB QUESTIONS (a)(b)(c)
@@ -135,7 +121,7 @@ def parse_qp(text):
             continue
 
         # ===============================
-        # ✅ ROMAN SUB PARTS (i)(ii)(iii)
+        # ✅ ROMAN PARTS (i)(ii)
         # ===============================
         if current_sub:
 
@@ -153,23 +139,14 @@ def parse_qp(text):
             else:
                 current_text += " " + line
 
-    # ===============================
-    # LAST QUESTION
-    # ===============================
+    # last question
     if current_q and current_sub and current_text:
         questions.append({
             "question": f"{current_q}{current_sub}",
             "question_text": clean_text(current_text)
         })
 
-    # ===============================
-    # REMOVE DUPLICATES
-    # ===============================
-    unique = {}
-    for q in questions:
-        unique[q["question"]] = q
-
-    return list(unique.values())
+    return questions
 # ---------- PARSE MARK SCHEME ----------
 
 def parse_ms(text):
