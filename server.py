@@ -177,10 +177,12 @@ def parse_qp(text):
 
     return list(unique.values())
 # ---------- PARSE MARK SCHEME ----------
+
 def parse_ms(text):
     answers = []
 
-    pattern = r"\d+\([a-z]\)"
+    # 🔥 FIX 1: support nested (1(e)(i)) also
+    pattern = r"\d+\([a-z]\)(?:\([ivx]+\))?"
     matches = list(re.finditer(pattern, text))
 
     for i in range(len(matches)):
@@ -190,14 +192,46 @@ def parse_ms(text):
         block = text[start:end]
         q_no = matches[i].group()
 
+        # ===============================
+        # 🔥 FIX 2: NORMALIZE QUESTION KEY
+        # ===============================
+        # convert 1(e)(iv) → 1(iv)
+        nested = re.match(r"(\d+)\([a-z]\)\(([ivx]+)\)", q_no)
+        if nested:
+            q_no = f"{nested.group(1)}({nested.group(2)})"
+
+        # ===============================
+        # 🔥 FIX 3: REMOVE GARBAGE TEXT
+        # ===============================
+        block = re.sub(r"Cambridge.*", "", block)
+        block = re.sub(r"UCLES.*", "", block)
+        block = re.sub(r"Page \d+.*", "", block)
+        block = re.sub(r"Question Answer Marks.*", "", block)
+
+        # ===============================
+        # 🔥 FIX 4: REMOVE QUESTION NUMBER FROM ANSWER
+        # ===============================
+        block = block.replace(matches[i].group(), "")
+
+      
         answer = re.sub(r"\s+", " ", block).strip()
+
+        # remove trailing marks (e.g., "1", "2")
+        answer = re.sub(r"\s\d+$", "", answer)
 
         answers.append({
             "question": q_no,
             "answer": answer
         })
 
-    return answers
+    # ===============================
+    # 🔥 FIX 6: REMOVE DUPLICATES
+    # ===============================
+    unique = {}
+    for a in answers:
+        unique[a["question"]] = a
+
+    return list(unique.values())
 
 
 # ---------- MAP TOPIC ----------
@@ -211,21 +245,34 @@ def map_topic(text):
 
 # ---------- MERGE ----------
 def merge(qp, ms):
-    ms_dict = {item["question"]: item for item in ms}
+    # ✅ clean mapping: question → answer
+    ms_dict = {item["question"]: item["answer"] for item in ms}
+
     result = []
 
     for q in qp:
         q_no = q["question"]
         ans = ""
 
+        # ===============================
+        # ✅ 1. EXACT MATCH (MOST IMPORTANT)
+        # ===============================
         if q_no in ms_dict:
-            ans = ms_dict[q_no]["answer"]
+            ans = ms_dict[q_no]
+
+        # ===============================
+        # ✅ 2. SAFE FALLBACK (ONLY IF NEEDED)
+        # ===============================
         else:
+            # handle case like 1(e) vs 1(e)(i)
             for key in ms_dict:
-                if key.startswith(q_no):
-                    ans = ms_dict[key]["answer"]
+                if key.startswith(q_no + "("):   # 🔥 safer condition
+                    ans = ms_dict[key]
                     break
 
+        # ===============================
+        # ✅ ADD TO RESULT
+        # ===============================
         result.append({
             "question": q_no,
             "question_text": q["question_text"],
@@ -234,7 +281,6 @@ def merge(qp, ms):
         })
 
     return result
-
 
 # ---------- SAVE ----------
 def save_to_db(data, paper_name):
