@@ -36,12 +36,12 @@ def clean_text(text):
     text = re.sub(r"\[\d+\]", "", text)
     text = re.sub(r"\.+", "", text)
     text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    # return text.strip()
+    return re.sub(r"\s+", " ", text).strip()
+    
 
 
 # ---------- PARSE QUESTION PAPER ----------
-import re
-
 def parse_qp(text):
     questions = []
 
