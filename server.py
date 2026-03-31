@@ -43,7 +43,8 @@ def clean_text(text):
 
 # ---------- PARSE QUESTION PAPER ----------
 def parse_qp(text):
-   
+    import re
+
     questions = []
 
     lines = text.split("\n")
@@ -57,35 +58,45 @@ def parse_qp(text):
         if not line:
             continue
 
-        # normalize spaces
+        # normalize spacing
         line = re.sub(r"\s+", " ", line)
 
         # ===============================
-        # 🚫 REMOVE GARBAGE
+        # 🚫 REMOVE GARBAGE / NOISE
         # ===============================
         if (
             "DO NOT WRITE" in line or
             "Working space" in line or
             "UCLES" in line or
-            "Turn over" in line
+            "Turn over" in line or
+            "Cambridge" in line
         ):
             continue
 
-        # skip long binary lines
+        # remove barcode lines
+        if "*" in line:
+            continue
+
+        # skip long binary values
         if re.match(r"^[01]{8,}$", line):
             continue
 
-        # skip hex junk
+        # skip hex garbage
         if re.match(r"^[0-9A-F]{6,}$", line):
             continue
 
         # ===============================
-        # ✅ MAIN QUESTION DETECTION (FIXED)
+        # ✅ DETECT QUESTION NUMBER (FIXED)
         # ===============================
-        match_q = re.match(r"^(\d+)\s+[A-Z]", line)
+        match_q = re.match(r"^(\d+)\b", line)
 
         if match_q:
-            current_q = match_q.group(1)
+            num = int(match_q.group(1))
+
+            # 🔥 only valid exam question numbers
+            if 1 <= num <= 20:
+                current_q = str(num)
+
             continue
 
         # ===============================
@@ -106,7 +117,7 @@ def parse_qp(text):
             continue
 
         # ===============================
-        # ✅ SUB QUESTIONS (a)(b)(c)
+        # ✅ (a)(b)(c)
         # ===============================
         if re.match(r"^\([a-z]\)", line):
 
@@ -121,7 +132,7 @@ def parse_qp(text):
             continue
 
         # ===============================
-        # ✅ ROMAN PARTS (i)(ii)
+        # ✅ (i)(ii)(iii)(iv)
         # ===============================
         if current_sub:
 
@@ -139,14 +150,23 @@ def parse_qp(text):
             else:
                 current_text += " " + line
 
-    # last question
+    # ===============================
+    # ✅ LAST QUESTION
+    # ===============================
     if current_q and current_sub and current_text:
         questions.append({
             "question": f"{current_q}{current_sub}",
             "question_text": clean_text(current_text)
         })
 
-    return questions
+    # ===============================
+    # ✅ REMOVE DUPLICATES
+    # ===============================
+    unique = {}
+    for q in questions:
+        unique[q["question"]] = q
+
+    return list(unique.values())
 # ---------- PARSE MARK SCHEME ----------
 
 def parse_ms(text):
