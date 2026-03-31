@@ -40,6 +40,8 @@ def clean_text(text):
 
 
 # ---------- PARSE QUESTION PAPER ----------
+import re
+
 def parse_qp(text):
     questions = []
 
@@ -58,7 +60,30 @@ def parse_qp(text):
         line = re.sub(r"\s+", " ", line)
 
         # ===============================
-        # ✅ STEP 1: QUESTION DETECTION FIRST
+        # 🚫 REMOVE FOOTER / GARBAGE
+        # ===============================
+        if (
+            "DO NOT WRITE" in line or
+            "Working space" in line or
+            "Turn over" in line or
+            "UCLES" in line or
+            "0478/" in line or
+            re.match(r"^\*.*\*$", line) or
+            re.match(r"^\.+$", line) or
+            re.match(r"^\[\d+\]$", line)
+        ):
+            continue
+
+        # skip binary
+        if re.match(r"^[01]{6,}$", line):
+            continue
+
+        # skip hex only
+        if re.match(r"^[0-9A-F]{3,}$", line):
+            continue
+
+        # ===============================
+        # ✅ STEP 1: QUESTION DETECTION FIRST (FIXED)
         # ===============================
 
         # Case 1: 2(a)
@@ -81,36 +106,22 @@ def parse_qp(text):
         if match_q_only:
             q_num = int(match_q_only.group(1))
 
-            # only valid question numbers
             if 1 <= q_num <= 20:
                 current_q = str(q_num)
 
             continue
 
-        # Case 3: "2 A computer..."
+        # Case 3: "2 A computer..." ✅ FIXED LOGIC
         match_q = re.match(r"^(\d+)\s+[A-Za-z]", line)
         if match_q:
-            current_q = match_q.group(1)
-            continue
+            new_q = int(match_q.group(1))
 
-        # ===============================
-        # 🚫 FILTERS AFTER DETECTION
-        # ===============================
+            # 🔥 ONLY allow proper sequence (1 → 2 → 3)
+            if current_q is None or new_q == int(current_q) + 1:
+                current_q = str(new_q)
+                current_sub = None
+                current_text = ""
 
-        if (
-            "DO NOT WRITE" in line or
-            "Working space" in line or
-            re.match(r"^\.+$", line) or
-            re.match(r"^\[\d+\]$", line)
-        ):
-            continue
-
-        # skip binary
-        if re.match(r"^[01]{6,}$", line):
-            continue
-
-        # skip hex only
-        if re.match(r"^[0-9A-F]+$", line):
             continue
 
         # ===============================
@@ -135,6 +146,7 @@ def parse_qp(text):
 
             if re.match(r"^\([ivx]+\)", line):
 
+                # 🔥 DO NOT CHANGE current_q HERE (important fix)
                 if current_q and current_sub and current_text:
                     questions.append({
                         "question": f"{current_q}{current_sub}",
@@ -147,14 +159,18 @@ def parse_qp(text):
             else:
                 current_text += " " + line
 
-    # last question
+    # ===============================
+    # ✅ LAST QUESTION
+    # ===============================
     if current_q and current_sub and current_text:
         questions.append({
             "question": f"{current_q}{current_sub}",
             "question_text": clean_text(current_text)
         })
 
-    # remove duplicates
+    # ===============================
+    # ✅ REMOVE DUPLICATES
+    # ===============================
     unique = {}
     for q in questions:
         unique[q["question"]] = q
