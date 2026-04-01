@@ -70,123 +70,82 @@ def strip_qp_noise(text):
 
 
 # ---------- PARSE QUESTION PAPER ----------
-def parse_qp(raw_text):
-    """
-    Parse the QP PDF into:
-      [{ "question": "1(a)", "question_text": "..." }, ...]
-
-    The PDF text arrives as a flat string. We locate all sub-question
-    labels and slice between them to extract question text.
-
-    Label hierarchy:
-      Top-level:  "1 A toy store..." -> question_num = 1
-      Main sub:   "(a)" or "1(a)"   -> 1(a)
-      Letter sub: "(e)"              -> 1(e)   (context intro, may have roman children)
-      Roman sub:  "(i)(ii)(iii)(iv)" -> 1(e)(i) etc.
-    """
-
-    text = strip_qp_noise(raw_text)
-
-    # Regex to find all sub-question markers in order
-    pattern = re.compile(
-        r'(?<!\w)'
-        r'('
-        r'\d+\s*\([a-z]\)\s*\([ivx]+\)'   # 1(e)(i) -- already nested
-        r'|\d+\s*\([a-z]\)'               # 1(a)    -- main sub with question num
-        r'|\([ivx]+\)'                    # (i)(ii) -- roman numerals
-        r'|\([a-z]\)'                     # (a)(b)  -- letter subs
-        r')'
-        r'(?!\w)'
-    )
-
-    # Also detect top-level question number introductions: "1 A toy..."
-    top_pattern = re.compile(r'(?<!\d)(\d+)\s+[A-Z]')
-
-    # Build unified marker list
-    all_markers = []
-    for m in pattern.finditer(text):
-        all_markers.append(('sub', m.start(), m.end(), m.group(1).replace(' ', '')))
-    for m in top_pattern.finditer(text):
-        num = int(m.group(1))
-        if 1 <= num <= 20:
-            all_markers.append(('top', m.start(), m.end(), str(num)))
-    all_markers.sort(key=lambda x: x[1])
+def parse_qp(text):
+    import re
 
     questions = []
-    current_q_num = None    # top-level number e.g. "1"
-    current_letter = None   # last letter sub e.g. "e" (for roman children)
 
-    for i, marker in enumerate(all_markers):
-        kind, start, end, label = marker
+    # ===============================
+    # CLEAN TEXT FIRST
+    # ===============================
+    text = re.sub(r"\s+", " ", text)
 
-        if kind == 'top':
-            current_q_num = label
+    # remove junk
+    text = re.sub(r"DO NOT WRITE.*?", "", text)
+    text = re.sub(r"Working space.*?", "", text)
+    text = re.sub(r"©.*?UCLES.*?", "", text)
+    text = re.sub(r"\*.*?\*", "", text)
+
+    # ===============================
+    # SPLIT INTO MAIN QUESTIONS (1,2,3...)
+    # ===============================
+    main_parts = re.split(r"(?=\b\d{1,2}\b)", text)
+
+    for part in main_parts:
+
+        # get question number
+        q_match = re.match(r"(\d{1,2})", part)
+        if not q_match:
             continue
 
-        # --- Resolve the full question key ---
-        if re.match(r'^\d+\([a-z]\)\([ivx]+\)$', label):
-            # Already fully nested: 1(e)(i)
-            q_key = label
-            m2 = re.match(r'^(\d+)\(([a-z])\)', label)
-            if m2:
-                current_q_num = m2.group(1)
-                current_letter = m2.group(2)
+        current_q = q_match.group(1)
 
-        elif re.match(r'^\d+\([a-z]\)$', label):
-            # Main sub like 1(a): update question number and letter
-            m2 = re.match(r'^(\d+)\(([a-z])\)$', label)
-            current_q_num = m2.group(1)
-            current_letter = m2.group(2)
-            q_key = label
+        # ===============================
+        # SPLIT INTO (a)(b)(c)
+        # ===============================
+        sub_parts = re.split(r"(?=\([a-z]\))", part)
 
-        elif re.match(r'^\([a-z]\)$', label):
-            # Letter sub like (a) -- needs current_q_num
-            if current_q_num is None:
+        for sub in sub_parts:
+
+            sub_match = re.match(r"\(([a-z])\)", sub)
+            if not sub_match:
                 continue
-            letter = label[1]  # extract letter from "(a)"
-            current_letter = letter
-            q_key = f"{current_q_num}({letter})"
 
-        elif re.match(r'^\([ivx]+\)$', label):
-            # Roman numeral sub like (i) -- attach to current letter sub
-            roman = label[1:-1]
-            if current_q_num and current_letter:
-                q_key = f"{current_q_num}({current_letter})({roman})"
-            elif current_q_num:
-                q_key = f"{current_q_num}{label}"
+            current_sub = f"({sub_match.group(1)})"
+
+            # ===============================
+            # CHECK FOR (i)(ii)(iii)
+            # ===============================
+            sub_sub_parts = re.split(r"(?=\([ivx]+\))", sub)
+
+            if len(sub_sub_parts) > 1:
+                for s in sub_sub_parts:
+                    ss_match = re.match(r"\(([ivx]+)\)", s)
+                    if not ss_match:
+                        continue
+
+                    question_id = f"{current_q}({ss_match.group(1)})"
+
+                    questions.append({
+                        "question": question_id,
+                        "question_text": clean_text(s)
+                    })
             else:
-                continue
+                question_id = f"{current_q}{current_sub}"
 
-        else:
-            continue
+                questions.append({
+                    "question": question_id,
+                    "question_text": clean_text(sub)
+                })
 
-        # --- Extract the question text block ---
-        # Slice from end of this marker to start of next sub-question marker
-        next_sub_start = len(text)
-        for j in range(i + 1, len(all_markers)):
-            if all_markers[j][0] == 'sub':
-                next_sub_start = all_markers[j][1]
-                break
-
-        raw_q_text = text[end:next_sub_start]
-        q_text = clean_text(raw_q_text)
-
-        if len(q_text) < 5:
-            continue
-
-        questions.append({
-            "question": q_key,
-            "question_text": q_text
-        })
-
-    # Deduplicate (last wins -- more complete text)
+    # ===============================
+    # REMOVE DUPLICATES
+    # ===============================
     unique = {}
     for q in questions:
         unique[q["question"]] = q
 
     return list(unique.values())
-
-
 # ---------- STRIP MS NOISE ----------
 def strip_ms_noise(text):
     """Pre-process raw mark scheme text to remove headers and mark columns."""
