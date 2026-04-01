@@ -76,70 +76,88 @@ def parse_qp(text):
     questions = []
 
     # ===============================
-    # CLEAN TEXT FIRST
+    # STEP 1: CLEAN TEXT
     # ===============================
     text = re.sub(r"\s+", " ", text)
 
-    # remove junk
-    text = re.sub(r"DO NOT WRITE.*?", "", text)
-    text = re.sub(r"Working space.*?", "", text)
-    text = re.sub(r"©.*?UCLES.*?", "", text)
-    text = re.sub(r"\*.*?\*", "", text)
+    # remove garbage
+    text = re.sub(r"©.*?UCLES.*?", " ", text)
+    text = re.sub(r"Turn over", " ", text)
+    text = re.sub(r"DO NOT WRITE.*?", " ", text)
+    text = re.sub(r"Working space.*?", " ", text)
+    text = re.sub(r"\*.*?\*", " ", text)
+
+    # remove long binary / hex junk
+    text = re.sub(r"\b[01]{8,}\b", " ", text)
+    text = re.sub(r"\b[0-9A-F]{6,}\b", " ", text)
 
     # ===============================
-    # SPLIT INTO MAIN QUESTIONS (1,2,3...)
+    # STEP 2: SPLIT MAIN QUESTIONS (1,2,3...)
     # ===============================
-    main_parts = re.split(r"(?=\b\d{1,2}\b)", text)
+    main_blocks = re.split(r"(?=\b\d{1,2}\s)", text)
 
-    for part in main_parts:
+    for block in main_blocks:
 
-        # get question number
-        q_match = re.match(r"(\d{1,2})", part)
+        q_match = re.match(r"(\d{1,2})", block)
         if not q_match:
             continue
 
-        current_q = q_match.group(1)
+        q_no = q_match.group(1)
 
         # ===============================
-        # SPLIT INTO (a)(b)(c)
+        # STEP 3: SPLIT (a)(b)(c)
         # ===============================
-        sub_parts = re.split(r"(?=\([a-z]\))", part)
+        sub_blocks = re.split(r"(?=\([a-z]\))", block)
 
-        for sub in sub_parts:
+        for sub in sub_blocks:
 
             sub_match = re.match(r"\(([a-z])\)", sub)
             if not sub_match:
                 continue
 
-            current_sub = f"({sub_match.group(1)})"
+            sub_id = sub_match.group(1)
 
             # ===============================
-            # CHECK FOR (i)(ii)(iii)
+            # STEP 4: SPLIT (i)(ii)(iii)
             # ===============================
-            sub_sub_parts = re.split(r"(?=\([ivx]+\))", sub)
+            subsub_blocks = re.split(r"(?=\([ivx]+\))", sub)
 
-            if len(sub_sub_parts) > 1:
-                for s in sub_sub_parts:
+            if len(subsub_blocks) > 1:
+
+                for s in subsub_blocks:
                     ss_match = re.match(r"\(([ivx]+)\)", s)
                     if not ss_match:
                         continue
 
-                    question_id = f"{current_q}({ss_match.group(1)})"
+                    qid = f"{q_no}({ss_match.group(1)})"
 
-                    questions.append({
-                        "question": question_id,
-                        "question_text": clean_text(s)
-                    })
+                    cleaned = clean_text(s)
+
+                    # 🚫 REMOVE MCQ options
+                    cleaned = re.sub(r"\b[A-D]\s+[A-Za-z].*?(?=[A-D]\s|$)", "", cleaned)
+
+                    if len(cleaned) > 10:
+                        questions.append({
+                            "question": qid,
+                            "question_text": cleaned
+                        })
+
             else:
-                question_id = f"{current_q}{current_sub}"
+                qid = f"{q_no}({sub_id})"
 
-                questions.append({
-                    "question": question_id,
-                    "question_text": clean_text(sub)
-                })
+                cleaned = clean_text(sub)
+
+                # 🚫 REMOVE MCQ options
+                cleaned = re.sub(r"\b[A-D]\s+[A-Za-z].*?(?=[A-D]\s|$)", "", cleaned)
+
+                if len(cleaned) > 10:
+                    questions.append({
+                        "question": qid,
+                        "question_text": cleaned
+                    })
 
     # ===============================
-    # REMOVE DUPLICATES
+    # STEP 5: REMOVE DUPLICATES
     # ===============================
     unique = {}
     for q in questions:
