@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify, render_template
 import re
 import json
 import os
@@ -20,6 +20,7 @@ with open("topics.json") as f:
 
 # ---------- EXTRACT TEXT ----------
 def extract_text(file):
+    """Extract text from PDF using PyMuPDF (fitz), reading each page in natural order."""
     text = ""
     pdf = fitz.open(stream=file.read(), filetype="pdf")
     for page in pdf:
@@ -29,198 +30,235 @@ def extract_text(file):
 
 # ---------- CLEAN TEXT ----------
 def clean_text(text):
-    text = re.sub(r"©.*?2025", "", text)
-    text = re.sub(r"UCLES.*", "", text)
-    text = re.sub(r"\[Turn over\]", "", text)
-    text = re.sub(r"[^\x00-\x7F]+", " ", text)
-    text = re.sub(r"\[\d+\]", "", text)
-    text = re.sub(r"\.+", "", text)
-    text = re.sub(r"\s+", " ", text)
-    # return text.strip()
-    return re.sub(r"\s+", " ", text).strip()
-    
+    """Remove noise from extracted question text."""
+    # Remove answer lines (dots) and mark brackets
+    text = re.sub(r'\.{3,}', '', text)
+    text = re.sub(r'\[\d+\]', '', text)
+    # Remove boilerplate
+    text = re.sub(r'©.*?202\d', '', text)
+    text = re.sub(r'UCLES\s*202\d.*', '', text)
+    text = re.sub(r'\[Turn\s*over\]?', '', text)
+    text = re.sub(r'DO NOT WRITE.*?MARGIN', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'Working\s*space', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'Cambridge IGCSE.*', '', text)
+    text = re.sub(r'0478/12.*', '', text)
+    # Remove PDF encoding artifacts
+    text = re.sub(r'\(cid:\d+\)', '', text)
+    text = re.sub(r'\*\s*\d{10,}\s*\*', '', text)
+    text = re.sub(r'\bDFD\b', '', text)
+    # Normalise whitespace
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
+# ---------- STRIP QP NOISE ----------
+def strip_qp_noise(text):
+    """Pre-process raw QP text before question splitting."""
+    text = re.sub(r'\(cid:\d+\)', ' ', text)
+    text = re.sub(r'\*\s*\d{10,}\s*\*', ' ', text)
+    text = re.sub(r'DO NOT WRITE\s+IN THIS MARGIN', ' ', text)
+    text = re.sub(r'Working\s+space', ' ', text)
+    text = re.sub(r'\[Turn\s*over\]?', ' ', text)
+    text = re.sub(r'©\s*UCLES\s*202\d', ' ', text)
+    text = re.sub(r'0478/12/O/N/25', ' ', text)
+    text = re.sub(r'\bDFD\b', ' ', text)
+    text = re.sub(r'Cambridge IGCSE[^\n]*', ' ', text)
+    text = re.sub(r'\f\d*\s*', ' ', text)   # form-feed + optional page number
+    text = re.sub(r'\f', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text
 
 
 # ---------- PARSE QUESTION PAPER ----------
-def parse_qp(text):
-    import re
+def parse_qp(raw_text):
+    """
+    Parse the QP PDF into:
+      [{ "question": "1(a)", "question_text": "..." }, ...]
+
+    The PDF text arrives as a flat string. We locate all sub-question
+    labels and slice between them to extract question text.
+
+    Label hierarchy:
+      Top-level:  "1 A toy store..." -> question_num = 1
+      Main sub:   "(a)" or "1(a)"   -> 1(a)
+      Letter sub: "(e)"              -> 1(e)   (context intro, may have roman children)
+      Roman sub:  "(i)(ii)(iii)(iv)" -> 1(e)(i) etc.
+    """
+
+    text = strip_qp_noise(raw_text)
+
+    # Regex to find all sub-question markers in order
+    pattern = re.compile(
+        r'(?<!\w)'
+        r'('
+        r'\d+\s*\([a-z]\)\s*\([ivx]+\)'   # 1(e)(i) -- already nested
+        r'|\d+\s*\([a-z]\)'               # 1(a)    -- main sub with question num
+        r'|\([ivx]+\)'                    # (i)(ii) -- roman numerals
+        r'|\([a-z]\)'                     # (a)(b)  -- letter subs
+        r')'
+        r'(?!\w)'
+    )
+
+    # Also detect top-level question number introductions: "1 A toy..."
+    top_pattern = re.compile(r'(?<!\d)(\d+)\s+[A-Z]')
+
+    # Build unified marker list
+    all_markers = []
+    for m in pattern.finditer(text):
+        all_markers.append(('sub', m.start(), m.end(), m.group(1).replace(' ', '')))
+    for m in top_pattern.finditer(text):
+        num = int(m.group(1))
+        if 1 <= num <= 20:
+            all_markers.append(('top', m.start(), m.end(), str(num)))
+    all_markers.sort(key=lambda x: x[1])
 
     questions = []
+    current_q_num = None    # top-level number e.g. "1"
+    current_letter = None   # last letter sub e.g. "e" (for roman children)
 
-    lines = text.split("\n")
-    current_q = None
-    current_sub = None
-    current_text = ""
+    for i, marker in enumerate(all_markers):
+        kind, start, end, label = marker
 
-    for line in lines:
-        line = line.strip()
-
-        if not line:
+        if kind == 'top':
+            current_q_num = label
             continue
 
-        # normalize spacing
-        line = re.sub(r"\s+", " ", line)
+        # --- Resolve the full question key ---
+        if re.match(r'^\d+\([a-z]\)\([ivx]+\)$', label):
+            # Already fully nested: 1(e)(i)
+            q_key = label
+            m2 = re.match(r'^(\d+)\(([a-z])\)', label)
+            if m2:
+                current_q_num = m2.group(1)
+                current_letter = m2.group(2)
 
-        # ===============================
-        # 🚫 REMOVE GARBAGE / NOISE
-        # ===============================
-        if (
-            "DO NOT WRITE" in line or
-            "Working space" in line or
-            "UCLES" in line or
-            "Turn over" in line or
-            "Cambridge" in line
-        ):
-            continue
+        elif re.match(r'^\d+\([a-z]\)$', label):
+            # Main sub like 1(a): update question number and letter
+            m2 = re.match(r'^(\d+)\(([a-z])\)$', label)
+            current_q_num = m2.group(1)
+            current_letter = m2.group(2)
+            q_key = label
 
-        # remove barcode lines
-        if "*" in line:
-            continue
+        elif re.match(r'^\([a-z]\)$', label):
+            # Letter sub like (a) -- needs current_q_num
+            if current_q_num is None:
+                continue
+            letter = label[1]  # extract letter from "(a)"
+            current_letter = letter
+            q_key = f"{current_q_num}({letter})"
 
-        # skip long binary values
-        if re.match(r"^[01]{8,}$", line):
-            continue
-
-        # skip hex garbage
-        if re.match(r"^[0-9A-F]{6,}$", line):
-            continue
-
-        # ===============================
-        # ✅ DETECT QUESTION NUMBER (FIXED)
-        # ===============================
-        match_q = re.match(r"^(\d+)\b", line)
-
-        if match_q:
-            num = int(match_q.group(1))
-
-            # 🔥 only valid exam question numbers
-            if 1 <= num <= 20:
-                current_q = str(num)
-
-            continue
-
-        # ===============================
-        # ✅ CASE: 2(a)
-        # ===============================
-        match_inline = re.match(r"^(\d+)\(([a-z])\)", line)
-        if match_inline:
-
-            if current_q and current_sub and current_text:
-                questions.append({
-                    "question": f"{current_q}{current_sub}",
-                    "question_text": clean_text(current_text)
-                })
-
-            current_q = match_inline.group(1)
-            current_sub = f"({match_inline.group(2)})"
-            current_text = line
-            continue
-
-        # ===============================
-        # ✅ (a)(b)(c)
-        # ===============================
-        if re.match(r"^\([a-z]\)", line):
-
-            if current_q and current_sub and current_text:
-                questions.append({
-                    "question": f"{current_q}{current_sub}",
-                    "question_text": clean_text(current_text)
-                })
-
-            current_sub = re.match(r"\([a-z]\)", line).group()
-            current_text = line
-            continue
-
-        # ===============================
-        # ✅ (i)(ii)(iii)(iv)
-        # ===============================
-        if current_sub:
-
-            if re.match(r"^\([ivx]+\)", line):
-
-                if current_q and current_sub and current_text:
-                    questions.append({
-                        "question": f"{current_q}{current_sub}",
-                        "question_text": clean_text(current_text)
-                    })
-
-                current_sub = re.match(r"\([ivx]+\)", line).group()
-                current_text = line
-
+        elif re.match(r'^\([ivx]+\)$', label):
+            # Roman numeral sub like (i) -- attach to current letter sub
+            roman = label[1:-1]
+            if current_q_num and current_letter:
+                q_key = f"{current_q_num}({current_letter})({roman})"
+            elif current_q_num:
+                q_key = f"{current_q_num}{label}"
             else:
-                current_text += " " + line
+                continue
 
-    # ===============================
-    # ✅ LAST QUESTION
-    # ===============================
-    if current_q and current_sub and current_text:
+        else:
+            continue
+
+        # --- Extract the question text block ---
+        # Slice from end of this marker to start of next sub-question marker
+        next_sub_start = len(text)
+        for j in range(i + 1, len(all_markers)):
+            if all_markers[j][0] == 'sub':
+                next_sub_start = all_markers[j][1]
+                break
+
+        raw_q_text = text[end:next_sub_start]
+        q_text = clean_text(raw_q_text)
+
+        if len(q_text) < 5:
+            continue
+
         questions.append({
-            "question": f"{current_q}{current_sub}",
-            "question_text": clean_text(current_text)
+            "question": q_key,
+            "question_text": q_text
         })
 
-    # ===============================
-    # ✅ REMOVE DUPLICATES
-    # ===============================
+    # Deduplicate (last wins -- more complete text)
     unique = {}
     for q in questions:
         unique[q["question"]] = q
 
     return list(unique.values())
+
+
+# ---------- STRIP MS NOISE ----------
+def strip_ms_noise(text):
+    """Pre-process raw mark scheme text to remove headers and mark columns."""
+    # Remove page headers
+    text = re.sub(
+        r'0478/12\s*Cambridge IGCSE[^\n]*\n[^\n]*PUBLISHED[^\n]*\n',
+        '\n', text
+    )
+    text = re.sub(r'Cambridge IGCSE[^\n]*PUBLISHED[^\n]*', '', text)
+    text = re.sub(r'© Cambridge University Press[^\n]*', '', text)
+    text = re.sub(r'October/November 2025\s*', '', text)
+    text = re.sub(r'0478/12\s*', '', text)
+    text = re.sub(r'Page \d+ of \d+\s*', '', text)
+    # Remove column headers
+    text = re.sub(r'Question\s+Answer\s+Marks', '', text)
+    text = re.sub(r'\bAnswer\b\s+\bMarks\b', '', text)
+    # Remove standalone mark-count numbers on their own line (e.g. "\n 4 \n")
+    # These are the "Marks" column values in the table
+    text = re.sub(r'(?m)^\s*\d{1,2}\s*$', '', text)
+    # Remove PDF encoding artifacts
+    text = re.sub(r'\(cid:\d+\)', '', text)
+    text = re.sub(r'\f', ' ', text)
+    return text
+
+
 # ---------- PARSE MARK SCHEME ----------
+def parse_ms(raw_text):
+    """
+    Parse the mark scheme PDF into:
+      [{ "question": "1(a)", "answer": "..." }, ...]
 
-def parse_ms(text):
+    The mark scheme uses labels like:
+      1(a)  1(b)  1(e)(i)  2(a)  5(c)(i)  7(f)(ii)
+    """
+
+    text = strip_ms_noise(raw_text)
+
+    # Match question labels: 1(a)  or  1(e)(i)
+    q_pattern = re.compile(
+        r'(?<!\w)'
+        r'(\d+\([a-z]\)(?:\([ivx]+\))?)'
+        r'(?!\w)'
+    )
+
+    matches = list(q_pattern.finditer(text))
+
     answers = []
+    for i, m in enumerate(matches):
+        q_label = m.group(1).strip()
+        ans_start = m.end()
+        ans_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
 
-    # 🔥 FIX 1: support nested (1(e)(i)) also
-    pattern = r"\d+\([a-z]\)(?:\([ivx]+\))?"
-    matches = list(re.finditer(pattern, text))
+        raw_answer = text[ans_start:ans_end]
 
-    for i in range(len(matches)):
-        start = matches[i].start()
-        end = matches[i+1].start() if i+1 < len(matches) else len(text)
+        # Clean the answer block
+        raw_answer = re.sub(r'\s+', ' ', raw_answer)
+        answer = raw_answer.strip()
 
-        block = text[start:end]
-        q_no = matches[i].group()
-
-        # ===============================
-        # 🔥 FIX 2: NORMALIZE QUESTION KEY
-        # ===============================
-        # convert 1(e)(iv) → 1(iv)
-        nested = re.match(r"(\d+)\([a-z]\)\(([ivx]+)\)", q_no)
-        if nested:
-            q_no = f"{nested.group(1)}({nested.group(2)})"
-
-        # ===============================
-        # 🔥 FIX 3: REMOVE GARBAGE TEXT
-        # ===============================
-        block = re.sub(r"Cambridge.*", "", block)
-        block = re.sub(r"UCLES.*", "", block)
-        block = re.sub(r"Page \d+.*", "", block)
-        block = re.sub(r"Question Answer Marks.*", "", block)
-
-        # ===============================
-        # 🔥 FIX 4: REMOVE QUESTION NUMBER FROM ANSWER
-        # ===============================
-        block = block.replace(matches[i].group(), "")
-
-      
-        answer = re.sub(r"\s+", " ", block).strip()
-
-        # remove trailing marks (e.g., "1", "2")
-        answer = re.sub(r"\s\d+$", "", answer)
+        # Remove trailing lone digit (residual mark count)
+        answer = re.sub(r'\s+\d{1,2}$', '', answer).strip()
 
         answers.append({
-            "question": q_no,
+            "question": q_label,
             "answer": answer
         })
 
-    # ===============================
-    # 🔥 FIX 6: REMOVE DUPLICATES
-    # ===============================
+    # Deduplicate -- prefer non-empty answers
     unique = {}
     for a in answers:
-        unique[a["question"]] = a
+        key = a["question"]
+        if key not in unique or (not unique[key]["answer"] and a["answer"]):
+            unique[key] = a
 
     return list(unique.values())
 
@@ -236,42 +274,32 @@ def map_topic(text):
 
 # ---------- MERGE ----------
 def merge(qp, ms):
-    # ✅ clean mapping: question → answer
     ms_dict = {item["question"]: item["answer"] for item in ms}
 
     result = []
-
     for q in qp:
-        q_no = q["question"]
-        ans = ""
+        q_key = q["question"]
+        ans = ms_dict.get(q_key, "")
 
-        # ===============================
-        # ✅ 1. EXACT MATCH (MOST IMPORTANT)
-        # ===============================
-        if q_no in ms_dict:
-            ans = ms_dict[q_no]
+        # Fallback: if key like "1(e)" has no direct match,
+        # collect answers from all its children e.g. "1(e)(i)", "1(e)(ii)"
+        if not ans:
+            child_answers = []
+            for ms_key, ms_ans in ms_dict.items():
+                if ms_key.startswith(q_key + "("):
+                    child_answers.append(ms_ans)
+            if child_answers:
+                ans = " | ".join(child_answers)
 
-        # ===============================
-        # ✅ 2. SAFE FALLBACK (ONLY IF NEEDED)
-        # ===============================
-        else:
-            # handle case like 1(e) vs 1(e)(i)
-            for key in ms_dict:
-                if key.startswith(q_no + "("):   # 🔥 safer condition
-                    ans = ms_dict[key]
-                    break
-
-        # ===============================
-        # ✅ ADD TO RESULT
-        # ===============================
         result.append({
-            "question": q_no,
+            "question": q_key,
             "question_text": q["question_text"],
             "answer": ans,
             "topic": map_topic(q["question_text"])
         })
 
     return result
+
 
 # ---------- SAVE ----------
 def save_to_db(data, paper_name):
