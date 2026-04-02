@@ -76,11 +76,10 @@ def parse_qp(text):
     questions = []
 
     # ===============================
-    # STEP 1: CLEAN TEXT
+    # CLEAN TEXT
     # ===============================
     text = re.sub(r"\s+", " ", text)
 
-    # remove garbage
     text = re.sub(r"©.*?UCLES.*?", " ", text)
     text = re.sub(r"Turn over", " ", text)
     text = re.sub(r"DO NOT WRITE.*?", " ", text)
@@ -90,16 +89,15 @@ def parse_qp(text):
     # remove encoding junk
     text = re.sub(r"[^\x00-\x7F]+", " ", text)
 
-    # remove long binary / hex junk
+    # remove binary / hex noise
     text = re.sub(r"\b[01]{8,}\b", " ", text)
     text = re.sub(r"\b[0-9A-F]{6,}\b", " ", text)
 
     # ===============================
-    # STEP 2: CONTROLLED SPLIT
+    # SPLIT BLOCKS
     # ===============================
     parts = re.split(r"(?=\b\d{1,2}\s)", text)
 
-    expected_q = 1
     valid_blocks = []
 
     for part in parts:
@@ -109,19 +107,17 @@ def parse_qp(text):
 
         num = int(match.group(1))
 
-        # ✅ ONLY accept correct sequence
-        if num == expected_q:
+        # ✅ ACCEPT ONLY REAL QUESTION NUMBERS
+        if 1 <= num <= 20:
             valid_blocks.append(part)
-            expected_q += 1
 
     # ===============================
-    # STEP 3: PROCESS VALID BLOCKS
+    # PROCESS BLOCKS
     # ===============================
     for block in valid_blocks:
 
         q_no = re.match(r"(\d{1,2})", block).group(1)
 
-        # split (a)(b)(c)
         sub_blocks = re.split(r"(?=\([a-z]\))", block)
 
         for sub in sub_blocks:
@@ -132,7 +128,6 @@ def parse_qp(text):
 
             sub_id = sub_match.group(1)
 
-            # split (i)(ii)(iii)
             subsub_blocks = re.split(r"(?=\([ivx]+\))", sub)
 
             if len(subsub_blocks) > 1:
@@ -160,7 +155,6 @@ def parse_qp(text):
 
                 cleaned = clean_text(sub)
 
-                # remove MCQ options
                 cleaned = re.sub(r"\b[A-D]\s+[A-Za-z].*?(?=[A-D]\s|$)", "", cleaned)
 
                 if len(cleaned) > 10:
@@ -170,7 +164,7 @@ def parse_qp(text):
                     })
 
     # ===============================
-    # STEP 4: REMOVE DUPLICATES
+    # REMOVE DUPLICATES
     # ===============================
     unique = {}
     for q in questions:
