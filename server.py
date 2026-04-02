@@ -87,26 +87,41 @@ def parse_qp(text):
     text = re.sub(r"Working space.*?", " ", text)
     text = re.sub(r"\*.*?\*", " ", text)
 
+    # remove encoding junk
+    text = re.sub(r"[^\x00-\x7F]+", " ", text)
+
     # remove long binary / hex junk
     text = re.sub(r"\b[01]{8,}\b", " ", text)
     text = re.sub(r"\b[0-9A-F]{6,}\b", " ", text)
 
     # ===============================
-    # STEP 2: SPLIT MAIN QUESTIONS (1,2,3...)
+    # STEP 2: CONTROLLED SPLIT
     # ===============================
-    main_blocks = re.split(r"(?=\b\d{1,2}\s)", text)
+    parts = re.split(r"(?=\b\d{1,2}\s)", text)
 
-    for block in main_blocks:
+    expected_q = 1
+    valid_blocks = []
 
-        q_match = re.match(r"(\d{1,2})", block)
-        if not q_match:
+    for part in parts:
+        match = re.match(r"(\d{1,2})", part)
+        if not match:
             continue
 
-        q_no = q_match.group(1)
+        num = int(match.group(1))
 
-        # ===============================
-        # STEP 3: SPLIT (a)(b)(c)
-        # ===============================
+        # ✅ ONLY accept correct sequence
+        if num == expected_q:
+            valid_blocks.append(part)
+            expected_q += 1
+
+    # ===============================
+    # STEP 3: PROCESS VALID BLOCKS
+    # ===============================
+    for block in valid_blocks:
+
+        q_no = re.match(r"(\d{1,2})", block).group(1)
+
+        # split (a)(b)(c)
         sub_blocks = re.split(r"(?=\([a-z]\))", block)
 
         for sub in sub_blocks:
@@ -117,14 +132,12 @@ def parse_qp(text):
 
             sub_id = sub_match.group(1)
 
-            # ===============================
-            # STEP 4: SPLIT (i)(ii)(iii)
-            # ===============================
+            # split (i)(ii)(iii)
             subsub_blocks = re.split(r"(?=\([ivx]+\))", sub)
 
             if len(subsub_blocks) > 1:
-
                 for s in subsub_blocks:
+
                     ss_match = re.match(r"\(([ivx]+)\)", s)
                     if not ss_match:
                         continue
@@ -133,7 +146,7 @@ def parse_qp(text):
 
                     cleaned = clean_text(s)
 
-                    # 🚫 REMOVE MCQ options
+                    # remove MCQ options
                     cleaned = re.sub(r"\b[A-D]\s+[A-Za-z].*?(?=[A-D]\s|$)", "", cleaned)
 
                     if len(cleaned) > 10:
@@ -147,7 +160,7 @@ def parse_qp(text):
 
                 cleaned = clean_text(sub)
 
-                # 🚫 REMOVE MCQ options
+                # remove MCQ options
                 cleaned = re.sub(r"\b[A-D]\s+[A-Za-z].*?(?=[A-D]\s|$)", "", cleaned)
 
                 if len(cleaned) > 10:
@@ -157,7 +170,7 @@ def parse_qp(text):
                     })
 
     # ===============================
-    # STEP 5: REMOVE DUPLICATES
+    # STEP 4: REMOVE DUPLICATES
     # ===============================
     unique = {}
     for q in questions:
