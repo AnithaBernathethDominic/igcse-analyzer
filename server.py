@@ -19,248 +19,139 @@ with open("topics.json") as f:
     TOPICS = json.load(f)
 
 
-# ---------- EXTRACT TEXT (PAGE-AWARE) ----------
+# ---------- EXTRACT TEXT ----------
 def extract_text(file):
-    """
-    Extract text from PDF using PyMuPDF, page by page.
-    Returns a list of (page_number, page_text) tuples so we can
-    strip lone page-number lines that appear at the top/bottom of each page.
-    """
-    pages = []
+    """Extract full raw text from PDF using PyMuPDF."""
+    text = ""
     pdf = fitz.open(stream=file.read(), filetype="pdf")
-    for page_index, page in enumerate(pdf):
-        text = page.get_text()
-        pages.append((page_index + 1, text))   # 1-based page number
-    return pages
-
-
-def pages_to_clean_text(pages):
-    """
-    Join pages into a single string, removing the lone page-number
-    lines that PyMuPDF emits at the top of each page for IGCSE papers.
-    These look like a bare integer (2, 3, 4 …) on its own line and are
-    the root cause of false question-number matches.
-    """
-    parts = []
-    for page_num, text in pages:
-        # Split into lines, drop lines that are ONLY a page number
-        lines = text.splitlines()
-        cleaned_lines = []
-        for line in lines:
-            stripped = line.strip()
-            # Drop lines that are purely a small integer (page numbers are
-            # typically 1-12 for IGCSE papers).  We also drop the barcode
-            # artefact lines that start with * digits *.
-            if re.fullmatch(r'\d{1,2}', stripped):
-                continue
-            if re.match(r'^\*\s*\d{10,}\s*\*', stripped):
-                continue
-            cleaned_lines.append(line)
-        parts.append('\n'.join(cleaned_lines))
-    return '\n'.join(parts)
-
-
-# ---------- CLEAN TEXT ----------
-def clean_text(text):
-    """Remove noise from extracted question text."""
-    # Remove answer lines (dots) and mark brackets
-    text = re.sub(r'\.{3,}', '', text)
-    text = re.sub(r'\[\d+\]', '', text)
-
-    # Remove boilerplate
-    text = re.sub(r'©.*?202\d', '', text)
-    text = re.sub(r'UCLES\s*202\d.*', '', text)
-    text = re.sub(r'\[Turn\s*over\]?', '', text)
-    text = re.sub(r'DO NOT WRITE.*?MARGIN', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'Working\s*space', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'Cambridge IGCSE.*', '', text)
-    text = re.sub(r'0478/12.*', '', text)
-
-    # Remove PDF encoding artifacts
-    text = re.sub(r'\(cid:\d+\)', '', text)
-    text = re.sub(r'\*\s*\d{10,}\s*\*', '', text)
-    text = re.sub(r'\bDFD\b', '', text)
-
-    # Normalise whitespace
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
+    for page in pdf:
+        text += page.get_text() + "\n"
+    return text
 
 
 # ---------- STRIP QP NOISE ----------
 def strip_qp_noise(text):
-    """Pre-process raw QP text before question splitting."""
-    text = re.sub(r'\(cid:\d+\)', ' ', text)
-    text = re.sub(r'\*\s*\d{10,}\s*\*', ' ', text)
-    text = re.sub(r'DO NOT WRITE\s+IN THIS MARGIN', ' ', text)
-    text = re.sub(r'Working\s+space', ' ', text)
-    text = re.sub(r'\[Turn\s*over\]?', ' ', text)
-    text = re.sub(r'©\s*UCLES\s*202\d', ' ', text)
-    text = re.sub(r'0478/12/O/N/25', ' ', text)
-    text = re.sub(r'\bDFD\b', ' ', text)
+    """Remove IGCSE boilerplate from question paper text."""
+    text = re.sub(r'0478/12[^\n]*', ' ', text)
+    text = re.sub(r'© UCLES 202\d', ' ', text)
+    text = re.sub(r'\[Turn over\]?', ' ', text)
+    text = re.sub(r'DC \(JP/CGW\).*', ' ', text)
+    text = re.sub(r'\* \d[\d ]+\d \*', ' ', text)
+    text = re.sub(r'Working\s+space', ' ', text, flags=re.IGNORECASE)
     text = re.sub(r'Cambridge IGCSE[^\n]*', ' ', text)
-    text = re.sub(r'\f\d*\s*', ' ', text)   # form-feed + optional page number
-    text = re.sub(r'\f', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\(cid:\d+\)', ' ', text)
+    text = re.sub(r'\bDFD\b', ' ', text)
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)  # strip non-ASCII artifacts
     return text
 
 
-# ---------- PARSE QUESTION PAPER ----------
-def parse_qp(pages):
-    """
-    Parse the question paper.
-
-    KEY FIX: we work from the page-aware text so that bare integers that
-    are page numbers have already been removed before we try to identify
-    question numbers.  We then use a tight regex that requires a question
-    number to be followed immediately by a sub-question letter in
-    parentheses, e.g. '1 (a)' or '1(a)', rather than just any lone digit.
-    """
-    # Build clean text with page numbers stripped
-    text = pages_to_clean_text(pages)
-    text = strip_qp_noise(text)
+# ---------- CLEAN QUESTION TEXT ----------
+def clean_text(text):
+    """Remove dot-lines, mark brackets and normalise whitespace."""
+    text = re.sub(r'\.{3,}', '', text)
+    text = re.sub(r'\[\d+\]', '', text)
     text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
+
+# ---------- PARSE QUESTION PAPER ----------
+def parse_qp(raw_text):
+    """
+    Parse the IGCSE question paper into structured question objects.
+
+    Key insight: PyMuPDF emits question numbers as  '\n1 \n', '\n2 \n'
+    (digit + trailing space + newline), whereas page numbers appear as
+    '\n2\n' (digit, NO trailing space).  We split on the question-number
+    pattern only, so page numbers are never mistaken for question numbers.
+
+    Sub-questions use letters (a-h) and sub-sub-questions use roman
+    numerals.  We deliberately avoid [a-z] for sub-letters because (i),
+    (ii) etc. would collide with roman-numeral sub-sub-question markers.
+    """
+    text = strip_qp_noise(raw_text)
     questions = []
 
-    # -------------------------------------------------------
-    # SPLIT ON MAIN QUESTION BOUNDARIES
-    # A main question starts with a digit (1-20) that is either:
-    #   • at the very start of the string, OR
-    #   • preceded by whitespace
-    # AND is immediately followed by whitespace then a '(' letter ')'
-    # sub-question marker.
-    #
-    # This prevents bare page numbers (2, 3, 4…) from being treated as
-    # question boundaries because a page number is never followed by (a).
-    # -------------------------------------------------------
-    # Pattern: word boundary, 1-2 digit number (1-20), space(s), then (letter)
-    main_pattern = re.compile(
-        r'(?<!\d)'               # not preceded by digit
-        r'(?<!\w)'               # not preceded by word char
-        r'(\d{1,2})'             # capture: the question number
-        r'(?=\s+\([a-z]\))'     # lookahead: whitespace then (a)/(b)/...
-    )
+    # Split on main question numbers: \n<digits><space>\n
+    main_pattern = re.compile(r'\n\s*(\d{1,2}) \n')
+    parts = main_pattern.split(text)
 
-    # Find all main question positions
-    main_matches = list(main_pattern.finditer(text))
+    # parts = [preamble, "1", block1, "2", block2, ...]
+    for i in range(1, len(parts), 2):
+        q_num = int(parts[i])
+        if not (1 <= q_num <= 20):
+            continue
+        block = parts[i + 1] if i + 1 < len(parts) else ""
 
-    # Filter to only real question numbers (1-20)
-    main_matches = [m for m in main_matches if 1 <= int(m.group(1)) <= 20]
-
-    # Deduplicate consecutive matches with the same number
-    deduped = []
-    seen_nums = set()
-    for m in main_matches:
-        n = int(m.group(1))
-        if n not in seen_nums:
-            seen_nums.add(n)
-            deduped.append(m)
-    main_matches = deduped
-
-    # Slice text into per-main-question blocks
-    blocks = []
-    for idx, m in enumerate(main_matches):
-        start = m.start()
-        end = main_matches[idx + 1].start() if idx + 1 < len(main_matches) else len(text)
-        blocks.append((m.group(1), text[start:end]))
-
-    # -------------------------------------------------------
-    # WITHIN EACH BLOCK, SPLIT ON SUB-QUESTIONS (a), (b), …
-    # -------------------------------------------------------
-    sub_pattern = re.compile(r'(?=\(([a-z])\))')
-
-    for q_no, block in blocks:
-        sub_blocks = sub_pattern.split(block)
-        # sub_pattern.split alternates: [prefix, letter, text, letter, text, …]
-        # Use finditer instead for cleaner extraction
-        sub_matches = list(re.finditer(r'\(([a-z])\)', block))
+        # Sub-questions: letters a-h only (avoids collision with roman i,v,x)
+        sub_matches = list(re.finditer(r'\(([a-h])\)', block))
 
         for s_idx, s_match in enumerate(sub_matches):
             sub_id = s_match.group(1)
             sub_start = s_match.start()
-            sub_end = sub_matches[s_idx + 1].start() if s_idx + 1 < len(sub_matches) else len(block)
+            sub_end = (sub_matches[s_idx + 1].start()
+                       if s_idx + 1 < len(sub_matches) else len(block))
             sub_text = block[sub_start:sub_end]
 
-            # Check for sub-sub questions: (i), (ii), (iii), (iv)
-            subsub_pattern = re.compile(r'\(([ivx]+)\)')
-            subsub_matches = list(subsub_pattern.finditer(sub_text))
+            # Sub-sub-questions: roman numerals (i), (ii), (iii), (iv)...
+            ss_matches = list(re.finditer(
+                r'\((i{1,3}|iv|vi{0,3}|ix|xi{0,3})\)', sub_text))
 
-            if subsub_matches:
-                for ss_idx, ss_match in enumerate(subsub_matches):
+            if ss_matches:
+                for ss_idx, ss_match in enumerate(ss_matches):
                     ss_id = ss_match.group(1)
                     ss_start = ss_match.start()
-                    ss_end = subsub_matches[ss_idx + 1].start() if ss_idx + 1 < len(subsub_matches) else len(sub_text)
+                    ss_end = (ss_matches[ss_idx + 1].start()
+                              if ss_idx + 1 < len(ss_matches) else len(sub_text))
                     ss_text = sub_text[ss_start:ss_end]
-
-                    qid = f"{q_no}({sub_id})({ss_id})"
+                    qid = f"{q_num}({sub_id})({ss_id})"
                     cleaned = clean_text(ss_text)
-                    # Remove MCQ options A/B/C/D
-                    cleaned = re.sub(r'\b[A-D]\s+[A-Za-z].*?(?=[A-D]\s|$)', '', cleaned)
                     if len(cleaned) > 10:
-                        questions.append({
-                            "question": qid,
-                            "question_text": cleaned
-                        })
+                        questions.append({"question": qid,
+                                          "question_text": cleaned})
             else:
-                qid = f"{q_no}({sub_id})"
+                qid = f"{q_num}({sub_id})"
                 cleaned = clean_text(sub_text)
-                cleaned = re.sub(r'\b[A-D]\s+[A-Za-z].*?(?=[A-D]\s|$)', '', cleaned)
+                # Remove MCQ option lines (A ... B ... C ... D ...)
+                cleaned = re.sub(r'\b[A-D] [A-Za-z].*', '', cleaned)
                 if len(cleaned) > 10:
-                    questions.append({
-                        "question": qid,
-                        "question_text": cleaned
-                    })
+                    questions.append({"question": qid,
+                                      "question_text": cleaned})
 
-    # Deduplicate – prefer non-empty text
+    # Deduplicate - first occurrence wins
     unique = {}
     for q in questions:
-        key = q["question"]
-        if key not in unique or (not unique[key]["question_text"] and q["question_text"]):
-            unique[key] = q
-
+        if q["question"] not in unique:
+            unique[q["question"]] = q
     return list(unique.values())
 
 
 # ---------- STRIP MS NOISE ----------
 def strip_ms_noise(text):
-    """Pre-process raw mark scheme text to remove headers and mark columns."""
-    # Remove page headers
-    text = re.sub(
-        r'0478/12\s*Cambridge IGCSE[^\n]*\n[^\n]*PUBLISHED[^\n]*\n',
-        '\n', text
-    )
-    text = re.sub(r'Cambridge IGCSE[^\n]*PUBLISHED[^\n]*', '', text)
-    text = re.sub(r'© Cambridge University Press[^\n]*', '', text)
-    text = re.sub(r'October/November 2025\s*', '', text)
-    text = re.sub(r'0478/12\s*', '', text)
-    text = re.sub(r'Page \d+ of \d+\s*', '', text)
-
-    # Remove column headers
-    text = re.sub(r'Question\s+Answer\s+Marks', '', text)
-    text = re.sub(r'\bAnswer\b\s+\bMarks\b', '', text)
-
-    # Remove standalone mark-count numbers on their own line (e.g. "\n 4 \n")
-    text = re.sub(r'(?m)^\s*\d{1,2}\s*$', '', text)
-
-    # Remove PDF encoding artifacts
-    text = re.sub(r'\(cid:\d+\)', '', text)
+    """Remove mark-scheme headers and mark-count columns."""
+    text = re.sub(r'0478/12[^\n]*', ' ', text)
+    text = re.sub(r'Cambridge IGCSE[^\n]*PUBLISHED[^\n]*', ' ', text)
+    text = re.sub(r'© Cambridge University Press[^\n]*', ' ', text)
+    text = re.sub(r'October/November 2025\s*', ' ', text)
+    text = re.sub(r'Page \d+ of \d+\s*', ' ', text)
+    text = re.sub(r'Question\s+Answer\s+Marks', ' ', text)
+    text = re.sub(r'\bAnswer\b\s+\bMarks\b', ' ', text)
+    # Standalone mark-count numbers on their own line
+    text = re.sub(r'(?m)^\s*\d{1,2}\s*$', ' ', text)
+    text = re.sub(r'\(cid:\d+\)', ' ', text)
     text = re.sub(r'\f', ' ', text)
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)
     return text
 
 
 # ---------- PARSE MARK SCHEME ----------
-def parse_ms(pages):
+def parse_ms(raw_text):
     """
     Parse the mark scheme PDF into:
     [{ "question": "1(a)", "answer": "..." }, ...]
-
-    KEY FIX: same page-aware approach removes lone page numbers before
-    we run the question-label regex, preventing false matches.
     """
-    text = pages_to_clean_text(pages)
-    text = strip_ms_noise(text)
+    text = strip_ms_noise(raw_text)
 
-    # Match question labels: 1(a) or 1(e)(i)
+    # Match labels like 1(a) or 1(e)(i)
     q_pattern = re.compile(
         r'(?<!\w)'
         r'(\d+\([a-z]\)(?:\([ivx]+\))?)'
@@ -274,22 +165,14 @@ def parse_ms(pages):
         q_label = m.group(1).strip()
         ans_start = m.end()
         ans_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-
         raw_answer = text[ans_start:ans_end]
-
-        # Clean the answer block
         raw_answer = re.sub(r'\s+', ' ', raw_answer)
         answer = raw_answer.strip()
-
         # Remove trailing lone digit (residual mark count)
         answer = re.sub(r'\s+\d{1,2}$', '', answer).strip()
+        answers.append({"question": q_label, "answer": answer})
 
-        answers.append({
-            "question": q_label,
-            "answer": answer
-        })
-
-    # Deduplicate — prefer non-empty answers
+    # Deduplicate - prefer non-empty answers
     unique = {}
     for a in answers:
         key = a["question"]
@@ -317,13 +200,10 @@ def merge(qp, ms):
         q_key = q["question"]
         ans = ms_dict.get(q_key, "")
 
-        # Fallback: if key like "1(e)" has no direct match,
-        # collect answers from all its children e.g. "1(e)(i)", "1(e)(ii)"
+        # Fallback: collect answers from child questions e.g. 1(e)(i), 1(e)(ii)
         if not ans:
-            child_answers = []
-            for ms_key, ms_ans in ms_dict.items():
-                if ms_key.startswith(q_key + "("):
-                    child_answers.append(ms_ans)
+            child_answers = [ms_ans for ms_key, ms_ans in ms_dict.items()
+                             if ms_key.startswith(q_key + "(")]
             if child_answers:
                 ans = " | ".join(child_answers)
 
@@ -367,11 +247,11 @@ def upload():
         ms_file = request.files["ms"]
         paper_name = qp_file.filename
 
-        qp_pages = extract_text(qp_file)
-        ms_pages = extract_text(ms_file)
+        qp_text = extract_text(qp_file)
+        ms_text = extract_text(ms_file)
 
-        qp_data = parse_qp(qp_pages)
-        ms_data = parse_ms(ms_pages)
+        qp_data = parse_qp(qp_text)
+        ms_data = parse_ms(ms_text)
 
         print("QP DATA:", qp_data)
         print("MS DATA:", ms_data)
