@@ -1,8 +1,11 @@
 from flask import Flask, request, jsonify, render_template
 
 import re
+
 import json
+
 import os
+
 import fitz  # PyMuPDF
 
 from supabase import create_client
@@ -10,16 +13,20 @@ from supabase import create_client
 app = Flask(__name__)
 
 # ---------- SUPABASE CONFIG ----------
+
 SUPABASE_URL = os.getenv("SUPABASE_URL")
+
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ---------- LOAD TOPICS ----------
+
 with open("topics.json") as f:
     TOPICS = json.load(f)
 
-
 # ---------- EXTRACT TEXT ----------
+
 def extract_text(file):
     """Extract full raw text from PDF using PyMuPDF."""
     text = ""
@@ -28,24 +35,59 @@ def extract_text(file):
         text += page.get_text() + "\n"
     return text
 
-
 # ---------- STRIP QP NOISE ----------
+
 def strip_qp_noise(text):
     """Remove IGCSE boilerplate from question paper text."""
-    text = re.sub(r'0478/12[^\n]*', ' ', text)
-    text = re.sub(r'© UCLES 202\d', ' ', text)
+    # Paper header / footer lines
+    text = re.sub(r'0478/\d+[^\n]*', ' ', text)
+    text = re.sub(r'© UCLES 202\d[^\n]*', ' ', text)
     text = re.sub(r'\[Turn over\]?', ' ', text)
     text = re.sub(r'DC \(JP/CGW\).*', ' ', text)
     text = re.sub(r'\* \d[\d ]+\d \*', ' ', text)
     text = re.sub(r'Working\s+space', ' ', text, flags=re.IGNORECASE)
     text = re.sub(r'Cambridge IGCSE[^\n]*', ' ', text)
+
+    # Margin watermark — repeated "DO NOT WRITE IN THIS MARGIN" blocks
+    text = re.sub(r'(?:DO NOT WRITE IN THIS MARGIN\s*)+', ' ', text, flags=re.IGNORECASE)
+
+    # Copyright / permission paragraph (multi-line, appears at end of papers)
+    text = re.sub(
+        r'Permission to reproduce items.*?(?=\n\s*\n|\Z)',
+        ' ', text, flags=re.DOTALL | re.IGNORECASE
+    )
+    text = re.sub(
+        r'Every reasonable effort has been made.*?(?=\n\s*\n|\Z)',
+        ' ', text, flags=re.DOTALL | re.IGNORECASE
+    )
+    text = re.sub(
+        r'To avoid the issue of disclosure.*?(?=\n\s*\n|\Z)',
+        ' ', text, flags=re.DOTALL | re.IGNORECASE
+    )
+    text = re.sub(
+        r'Cambridge Assessment International Education.*?(?=\n\s*\n|\Z)',
+        ' ', text, flags=re.DOTALL | re.IGNORECASE
+    )
+    text = re.sub(
+        r'Cambridge Assessment is the brand name.*?(?=\n\s*\n|\Z)',
+        ' ', text, flags=re.DOTALL | re.IGNORECASE
+    )
+    text = re.sub(
+        r'This is produced for each series of examinations.*?(?=\n\s*\n|\Z)',
+        ' ', text, flags=re.DOTALL | re.IGNORECASE
+    )
+    text = re.sub(r'www\.cambridgeinternational\.org[^\n]*', ' ', text)
+    text = re.sub(r'BLANK\s+PAGE', ' ', text, flags=re.IGNORECASE)
+
+    # Encoding artifacts
     text = re.sub(r'\(cid:\d+\)', ' ', text)
     text = re.sub(r'\bDFD\b', ' ', text)
     text = re.sub(r'[^\x00-\x7F]+', ' ', text)  # strip non-ASCII artifacts
+
     return text
 
-
 # ---------- CLEAN QUESTION TEXT ----------
+
 def clean_text(text):
     """Remove dot-lines, mark brackets and normalise whitespace."""
     text = re.sub(r'\.{3,}', '', text)
@@ -53,22 +95,23 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
-
 # ---------- PARSE QUESTION PAPER ----------
+
 def parse_qp(raw_text):
     """
     Parse the IGCSE question paper into structured question objects.
 
-    Key insight: PyMuPDF emits question numbers as  '\n1 \n', '\n2 \n'
+    Key insight: PyMuPDF emits question numbers as '\\n1 \\n', '\\n2 \\n'
     (digit + trailing space + newline), whereas page numbers appear as
-    '\n2\n' (digit, NO trailing space).  We split on the question-number
+    '\\n2\\n' (digit, NO trailing space). We split on the question-number
     pattern only, so page numbers are never mistaken for question numbers.
 
     Sub-questions use letters (a-h) and sub-sub-questions use roman
-    numerals.  We deliberately avoid [a-z] for sub-letters because (i),
+    numerals. We deliberately avoid [a-z] for sub-letters because (i),
     (ii) etc. would collide with roman-numeral sub-sub-question markers.
     """
     text = strip_qp_noise(raw_text)
+
     questions = []
 
     # Split on main question numbers: \n<digits><space>\n
@@ -101,7 +144,7 @@ def parse_qp(raw_text):
                     ss_id = ss_match.group(1)
                     ss_start = ss_match.start()
                     ss_end = (ss_matches[ss_idx + 1].start()
-                              if ss_idx + 1 < len(ss_matches) else len(sub_text))
+                               if ss_idx + 1 < len(ss_matches) else len(sub_text))
                     ss_text = sub_text[ss_start:ss_end]
                     qid = f"{q_num}({sub_id})({ss_id})"
                     cleaned = clean_text(ss_text)
@@ -122,28 +165,46 @@ def parse_qp(raw_text):
     for q in questions:
         if q["question"] not in unique:
             unique[q["question"]] = q
+
     return list(unique.values())
 
-
 # ---------- STRIP MS NOISE ----------
+
 def strip_ms_noise(text):
     """Remove mark-scheme headers and mark-count columns."""
-    text = re.sub(r'0478/12[^\n]*', ' ', text)
+    text = re.sub(r'0478/\d+[^\n]*', ' ', text)
     text = re.sub(r'Cambridge IGCSE[^\n]*PUBLISHED[^\n]*', ' ', text)
     text = re.sub(r'© Cambridge University Press[^\n]*', ' ', text)
     text = re.sub(r'October/November 2025\s*', ' ', text)
     text = re.sub(r'Page \d+ of \d+\s*', ' ', text)
     text = re.sub(r'Question\s+Answer\s+Marks', ' ', text)
     text = re.sub(r'\bAnswer\b\s+\bMarks\b', ' ', text)
+
+    # Margin watermark
+    text = re.sub(r'(?:DO NOT WRITE IN THIS MARGIN\s*)+', ' ', text, flags=re.IGNORECASE)
+
+    # Copyright / permission paragraph
+    text = re.sub(
+        r'Permission to reproduce items.*?(?=\n\s*\n|\Z)',
+        ' ', text, flags=re.DOTALL | re.IGNORECASE
+    )
+    text = re.sub(
+        r'Cambridge Assessment International Education.*?(?=\n\s*\n|\Z)',
+        ' ', text, flags=re.DOTALL | re.IGNORECASE
+    )
+    text = re.sub(r'www\.cambridgeinternational\.org[^\n]*', ' ', text)
+    text = re.sub(r'BLANK\s+PAGE', ' ', text, flags=re.IGNORECASE)
+
     # Standalone mark-count numbers on their own line
     text = re.sub(r'(?m)^\s*\d{1,2}\s*$', ' ', text)
     text = re.sub(r'\(cid:\d+\)', ' ', text)
     text = re.sub(r'\f', ' ', text)
     text = re.sub(r'[^\x00-\x7F]+', ' ', text)
+
     return text
 
-
 # ---------- PARSE MARK SCHEME ----------
+
 def parse_ms(raw_text):
     """
     Parse the mark scheme PDF into:
@@ -168,6 +229,7 @@ def parse_ms(raw_text):
         raw_answer = text[ans_start:ans_end]
         raw_answer = re.sub(r'\s+', ' ', raw_answer)
         answer = raw_answer.strip()
+
         # Remove trailing lone digit (residual mark count)
         answer = re.sub(r'\s+\d{1,2}$', '', answer).strip()
         answers.append({"question": q_label, "answer": answer})
@@ -181,8 +243,8 @@ def parse_ms(raw_text):
 
     return list(unique.values())
 
-
 # ---------- MAP TOPIC ----------
+
 def map_topic(text):
     for topic, keywords in TOPICS.items():
         for word in keywords:
@@ -190,8 +252,8 @@ def map_topic(text):
                 return topic
     return "General"
 
-
 # ---------- MERGE ----------
+
 def merge(qp, ms):
     ms_dict = {item["question"]: item["answer"] for item in ms}
     result = []
@@ -216,8 +278,8 @@ def merge(qp, ms):
 
     return result
 
-
 # ---------- SAVE ----------
+
 def save_to_db(data, paper_name):
     for item in data:
         supabase.table("questions").insert({
@@ -228,17 +290,15 @@ def save_to_db(data, paper_name):
             "topic": item.get("topic", "General")
         }).execute()
 
-
 # ---------- ROUTES ----------
+
 @app.route("/")
 def index():
     return render_template("index.html")
 
-
 @app.route("/practice")
 def practice_page():
     return render_template("practice.html")
-
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -265,19 +325,16 @@ def upload():
         print("ERROR:", str(e))
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/topics")
 def get_topics():
     response = supabase.table("questions").select("topic").execute()
     topics = list(set([item["topic"] for item in response.data]))
     return jsonify(topics)
 
-
 @app.route("/practice/<topic>")
 def practice(topic):
     response = supabase.table("questions").select("*").eq("topic", topic).execute()
     return jsonify(response.data)
-
 
 @app.route("/feedback", methods=["POST"])
 def feedback():
@@ -314,7 +371,6 @@ def feedback():
         "highlighted": highlighted,
         "model": correct
     })
-
 
 if __name__ == "__main__":
     app.run(debug=True)
