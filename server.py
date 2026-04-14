@@ -28,7 +28,6 @@ def extract_text(file):
 
 # ---------- STRIP QP NOISE ----------
 def strip_qp_noise(text):
-    """Remove IGCSE boilerplate from question paper text."""
     text = re.sub(r'0478/\d+[^\n]*', ' ', text)
     text = re.sub(r'© UCLES 202\d[^\n]*', ' ', text)
     text = re.sub(r'\[Turn over\]?', ' ', text)
@@ -38,73 +37,91 @@ def strip_qp_noise(text):
     text = re.sub(r'Cambridge IGCSE[^\n]*', ' ', text)
     text = re.sub(r'\(cid:\d+\)', ' ', text)
     text = re.sub(r'\bDFD\b', ' ', text)
-    # Remove standalone page numbers (digit(s) alone on a line)
     text = re.sub(r'(?m)^\s*\d{1,3}\s*$', ' ', text)
-    # Remove header/footer lines with paper codes or session info
     text = re.sub(r'(?i)(january|february|march|april|may|june|july|august|september|october|november|december)\s*/?\s*\d{4}[^\n]*', ' ', text)
-    # Remove lines that are purely punctuation or symbols
-    text = re.sub(r'(?m)^\s*[^a-zA-Z0-9\(\)\[\]]{3,}\s*$', ' ', text)
-    # Remove "For Examiner's Use" and similar margin text
     text = re.sub(r"For\s+Examiner[''s]*\s+Use", ' ', text, flags=re.IGNORECASE)
     text = re.sub(r'BLANK PAGE[^\n]*', ' ', text, flags=re.IGNORECASE)
     text = re.sub(r'Do not write[^\n]*', ' ', text, flags=re.IGNORECASE)
-    text = re.sub(r'[^\x00-\x7F]+', ' ', text)  # strip non-ASCII artifacts
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)
     return text
 
 # ---------- CLEAN QUESTION TEXT ----------
 def clean_text(text):
-    """Remove dot-lines, mark brackets, garbage fragments and normalise whitespace."""
-    text = re.sub(r'\.{3,}', '', text)           # dot leaders
-    text = re.sub(r'\[\d+\]', '', text)           # mark allocations [2]
-    text = re.sub(r'\(\d+\)', '', text)           # mark allocations (2)
-    # Remove isolated single letters that are not sub-question labels
-    text = re.sub(r'(?<!\w)[B-HJ-UW-Z](?!\w)', '', text)
-    # Remove residual page numbers mid-text
-    text = re.sub(r'(?<!\w)\d{1,3}(?!\w)', lambda m: '' if int(m.group()) < 50 and len(m.group()) <= 2 else m.group(), text)
+    text = re.sub(r'\.{3,}', '', text)
+    text = re.sub(r'\[\d+\]', '', text)
+    text = re.sub(r'\(\d+\)', '', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
+# ---------- DEBUG ----------
+def debug_qp_structure(text):
+    print("\n=== RAW TEXT SAMPLE (first 3000 chars after noise strip) ===")
+    print(repr(text[:3000]))
+    print("=== END SAMPLE ===\n")
+    for q in range(1, 11):
+        for m in re.finditer(rf'(.{{0,30}})(\b{q}\b)(.{{0,30}})', text):
+            print(f"  [DEBUG] Q{q} context: {repr(m.group(0))}")
+            break
+
 # ---------- PARSE QUESTION PAPER ----------
 def parse_qp(raw_text):
-    """
-    Parse the IGCSE question paper into structured question objects.
-
-    Key insight: PyMuPDF emits question numbers as  '\\n1 \\n', '\\n2 \\n'
-    (digit + trailing space + newline), whereas page numbers appear as
-    '\\n2\\n' (digit, NO trailing space).  We split on the question-number
-    pattern only, so page numbers are never mistaken for question numbers.
-
-    Sub-questions use letters (a-h) and sub-sub-questions use roman
-    numerals.  We deliberately avoid [a-z] for sub-letters because (i),
-    (ii) etc. would collide with roman-numeral sub-sub-question markers.
-    """
     text = strip_qp_noise(raw_text)
+    debug_qp_structure(text)
+
     questions = []
+    parts = []
 
-    # Split on main question numbers: \n<digits><space>\n
-    main_pattern = re.compile(r'\n\s*(\d{1,2}) \n')
-    parts = main_pattern.split(text)
+    # Try strategies from most to least strict
+    strategies = [
+        (r'\n\s*(\d{1,2}) \n',                         "digit+space+newline"),
+        (r'\n\s*(\d{1,2})\s*\n',                        "digit+newline"),
+        (r'\n{2,}\s*(\d{1,2})[ \t]*\n',                 "double-newline+digit"),
+        (r'(?m)^[ \t]*(\d{1,2})[ \t]+(?=[A-Z(])',       "line-start digit before uppercase"),
+        (r'(?<!\d)[ \t]*\n[ \t]*(\d{1,2})[ \t]*\n[ \t]*(?!\d)', "loose newline-digit-newline"),
+    ]
 
-    # parts = [preamble, "1", block1, "2", block2, ...]
+    for pattern, name in strategies:
+        p = re.compile(pattern)
+        parts = p.split(text)
+        print(f"[DEBUG] Strategy '{name}': {len(parts)} parts")
+        if len(parts) > 3:
+            print(f"[DEBUG] Using strategy: {name}")
+            break
+
+    if len(parts) <= 3:
+        print("[ERROR] No strategy matched. Dumping full text for inspection:")
+        print(repr(text[:5000]))
+        return []
+
     for i in range(1, len(parts), 2):
-        q_num = int(parts[i])
+        try:
+            q_num = int(parts[i].strip())
+        except ValueError:
+            continue
+
         if not (1 <= q_num <= 20):
             continue
 
         block = parts[i + 1] if i + 1 < len(parts) else ""
 
-        # Sub-questions: letters a-h only (avoids collision with roman i,v,x)
         sub_matches = list(re.finditer(r'\(([a-h])\)', block))
+
+        if not sub_matches:
+            qid = f"{q_num}"
+            cleaned = clean_text(block)
+            cleaned = re.sub(r'\b[A-D] [A-Za-z].*', '', cleaned)
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            if len(cleaned) > 10:
+                questions.append({"question": qid, "question_text": cleaned})
+            continue
 
         for s_idx, s_match in enumerate(sub_matches):
             sub_id = s_match.group(1)
             sub_start = s_match.start()
             sub_end = (sub_matches[s_idx + 1].start()
                        if s_idx + 1 < len(sub_matches) else len(block))
-
             sub_text = block[sub_start:sub_end]
 
-            # Sub-sub-questions: roman numerals (i), (ii), (iii), (iv)...
             ss_matches = list(re.finditer(
                 r'\((i{1,3}|iv|vi{0,3}|ix|xi{0,3})\)', sub_text))
 
@@ -114,41 +131,29 @@ def parse_qp(raw_text):
                     ss_start = ss_match.start()
                     ss_end = (ss_matches[ss_idx + 1].start()
                               if ss_idx + 1 < len(ss_matches) else len(sub_text))
-
                     ss_text = sub_text[ss_start:ss_end]
                     qid = f"{q_num}({sub_id})({ss_id})"
                     cleaned = clean_text(ss_text)
                     if len(cleaned) > 10:
-                        questions.append({"question": qid,
-                                          "question_text": cleaned})
+                        questions.append({"question": qid, "question_text": cleaned})
             else:
                 qid = f"{q_num}({sub_id})"
                 cleaned = clean_text(sub_text)
-                # Remove MCQ option lines (A ... B ... C ... D ...)
                 cleaned = re.sub(r'\b[A-D] [A-Za-z].*', '', cleaned)
-                # Remove any remaining garbage fragments:
-                # lines that are fewer than 3 words and contain no verb-like content
-                lines = cleaned.split('.')
-                cleaned = '. '.join(
-                    line for line in lines
-                    if len(line.split()) >= 3 or any(c.isalpha() for c in line)
-                )
                 cleaned = re.sub(r'\s+', ' ', cleaned).strip()
                 if len(cleaned) > 10:
-                    questions.append({"question": qid,
-                                      "question_text": cleaned})
+                    questions.append({"question": qid, "question_text": cleaned})
 
-    # Deduplicate - first occurrence wins
     unique = {}
     for q in questions:
         if q["question"] not in unique:
             unique[q["question"]] = q
 
+    print(f"[DEBUG] Total questions parsed: {len(unique)}")
     return list(unique.values())
 
 # ---------- STRIP MS NOISE ----------
 def strip_ms_noise(text):
-    """Remove mark-scheme headers and mark-count columns."""
     text = re.sub(r'0478/\d+[^\n]*', ' ', text)
     text = re.sub(r'Cambridge IGCSE[^\n]*PUBLISHED[^\n]*', ' ', text)
     text = re.sub(r'© Cambridge University Press[^\n]*', ' ', text)
@@ -156,24 +161,20 @@ def strip_ms_noise(text):
     text = re.sub(r'Page \d+ of \d+\s*', ' ', text)
     text = re.sub(r'Question\s+Answer\s+Marks', ' ', text)
     text = re.sub(r'\bAnswer\b\s+\bMarks\b', ' ', text)
-    # Standalone mark-count numbers on their own line
     text = re.sub(r'(?m)^\s*\d{1,2}\s*$', ' ', text)
     text = re.sub(r'\(cid:\d+\)', ' ', text)
     text = re.sub(r'\f', ' ', text)
-    # Remove "Accept / Do not accept" style markers that bleed between answers
-    text = re.sub(r'(?i)\b(accept|do not accept|allow|reject|ignore|must see)\b[^\n]*', lambda m: m.group(), text)
     text = re.sub(r'[^\x00-\x7F]+', ' ', text)
     return text
 
 # ---------- PARSE MARK SCHEME ----------
 def parse_ms(raw_text):
-    """
-    Parse the mark scheme PDF into:
-    [{ "question": "1(a)", "answer": "..." }, ...]
-    """
     text = strip_ms_noise(raw_text)
 
-    # Match labels like 1(a) or 1(e)(i)
+    print("\n=== MS RAW TEXT SAMPLE (first 2000 chars) ===")
+    print(repr(text[:2000]))
+    print("=== END MS SAMPLE ===\n")
+
     q_pattern = re.compile(
         r'(?<!\w)'
         r'(\d+\([a-z]\)(?:\([ivx]+\))?)'
@@ -181,33 +182,28 @@ def parse_ms(raw_text):
     )
 
     matches = list(q_pattern.finditer(text))
-    answers = []
+    print(f"[DEBUG] MS labels found: {[m.group(1) for m in matches]}")
 
+    answers = []
     for i, m in enumerate(matches):
         q_label = m.group(1).strip()
         ans_start = m.end()
         ans_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-
         raw_answer = text[ans_start:ans_end]
         raw_answer = re.sub(r'\s+', ' ', raw_answer)
         answer = raw_answer.strip()
-
-        # Remove trailing lone digit (residual mark count)
         answer = re.sub(r'\s+\d{1,2}$', '', answer).strip()
-
-        # Remove leading/trailing noise tokens (e.g. bare punctuation, lone letters)
         answer = re.sub(r'^[\s;:,/\\|]+', '', answer).strip()
         answer = re.sub(r'[\s;:,/\\|]+$', '', answer).strip()
-
         answers.append({"question": q_label, "answer": answer})
 
-    # Deduplicate - prefer non-empty answers
     unique = {}
     for a in answers:
         key = a["question"]
         if key not in unique or (not unique[key]["answer"] and a["answer"]):
             unique[key] = a
 
+    print(f"[DEBUG] Total MS answers parsed: {len(unique)}")
     return list(unique.values())
 
 # ---------- MAP TOPIC ----------
@@ -222,25 +218,20 @@ def map_topic(text):
 def merge(qp, ms):
     ms_dict = {item["question"]: item["answer"] for item in ms}
     result = []
-
     for q in qp:
         q_key = q["question"]
         ans = ms_dict.get(q_key, "")
-
-        # Fallback: collect answers from child questions e.g. 1(e)(i), 1(e)(ii)
         if not ans:
             child_answers = [ms_ans for ms_key, ms_ans in ms_dict.items()
                              if ms_key.startswith(q_key + "(")]
             if child_answers:
                 ans = " | ".join(child_answers)
-
         result.append({
             "question": q_key,
             "question_text": q["question_text"],
             "answer": ans,
             "topic": map_topic(q["question_text"])
         })
-
     return result
 
 # ---------- SAVE ----------
@@ -285,7 +276,8 @@ def upload():
         return jsonify(final_data)
 
     except Exception as e:
-        print("ERROR:", str(e))
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route("/topics")
@@ -301,7 +293,6 @@ def practice(topic):
 
 @app.route("/feedback", methods=["POST"])
 def feedback():
-    # Common stopwords to exclude from keyword matching
     STOPWORDS = {
         "the", "and", "that", "this", "with", "from", "have", "which",
         "will", "when", "what", "where", "there", "their", "they", "than",
@@ -309,12 +300,10 @@ def feedback():
         "could", "should", "about", "after", "before", "other", "also",
         "more", "some", "been", "were", "being", "because", "while"
     }
-
     data = request.json
     student = data.get("student", "").lower()
     correct = data.get("correct", "").lower()
 
-    # Only keep meaningful keywords (length > 4 and not stopwords)
     keywords = list(set([
         word for word in re.findall(r'[a-z]+', correct)
         if len(word) > 4 and word not in STOPWORDS
