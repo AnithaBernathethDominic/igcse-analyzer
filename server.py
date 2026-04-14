@@ -4,7 +4,6 @@ import re
 import json
 import os
 import fitz  # PyMuPDF
-
 from supabase import create_client
 
 app = Flask(__name__)
@@ -18,255 +17,128 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 with open("topics.json") as f:
     TOPICS = json.load(f)
 
-
-# ---------- PDF TEXT EXTRACTION ----------
-def extract_text_pages(file_storage, crop=True):
-    """
-    Extract text page-by-page using PyMuPDF.
-
-    When crop=True, trims page margins to avoid barcode/footer/margin noise such as:
-    - DO NOT WRITE IN THIS MARGIN
-    - page numbers
-    - turn over/footer strings
-    - barcode junk / symbol garbage
-    """
-    pdf_bytes = file_storage.read()
-    pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
-    pages = []
-
+# ---------- EXTRACT TEXT ----------
+def extract_text(file):
+    """Extract full raw text from PDF using PyMuPDF."""
+    text = ""
+    pdf = fitz.open(stream=file.read(), filetype="pdf")
     for page in pdf:
-        rect = page.rect
-
-        if crop:
-            # Keep the main content area only.
-            # This removes most header/footer/margin garbage from Cambridge PDFs.
-            clip = fitz.Rect(
-                rect.width * 0.07,   # left
-                rect.height * 0.06,  # top
-                rect.width * 0.93,   # right
-                rect.height * 0.90   # bottom
-            )
-            text = page.get_text("text", clip=clip)
-        else:
-            text = page.get_text("text")
-
-        pages.append(text)
-
-    return pages
-
-
-def extract_text(file_storage):
-    """Backwards-compatible raw text extractor."""
-    return "\n".join(extract_text_pages(file_storage))
-
-
-# ---------- COMMON CLEANING ----------
-def normalize_unicode(text):
-    text = text.replace("’", "'").replace("‘", "'")
-    text = text.replace("“", '"').replace("”", '"')
-    text = text.replace("–", "-").replace("—", "-")
-    text = text.replace("−", "-")
-    text = text.replace("™", "")
+        text += page.get_text() + "\n"
     return text
-
-
-def remove_binary_garbage(text):
-    """Remove barcode / OCR / encoding junk lines."""
-    cleaned_lines = []
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            cleaned_lines.append("")
-            continue
-
-        # Cambridge barcode / page artifact junk
-        if re.fullmatch(r"\*\s*[0-9 ]+\s*\*", s):
-            continue
-        if re.search(r"[¬Ĭĥ¥ÕõąċČÛÙÀú¾´íÈÏĪÅ]+", s):
-            continue
-        if re.search(r"[,`´~^_]{2,}", s):
-            continue
-        if re.search(r"[\x00-\x08\x0B\x0C\x0E-\x1F]", s):
-            continue
-
-        cleaned_lines.append(line)
-
-    return "\n".join(cleaned_lines)
-
 
 # ---------- STRIP QP NOISE ----------
 def strip_qp_noise(text):
-    """Remove Cambridge boilerplate and repeating junk from question paper text."""
-    text = normalize_unicode(text)
-    text = remove_binary_garbage(text)
-
-    # Header / footer / metadata
-    patterns = [
-        r'This document (?:consists of|has) \d+ (?:printed )?pages\.?',
-        r'Cambridge IGCSE[^\n]*',
-        r'COMPUTER SCIENCE\s*0478/12[^\n]*',
-        r'Paper 1[^\n]*',
-        r'1 hour 45 minutes',
-        r'INSTRUCTIONS',
-        r'INFORMATION',
-        r'You must answer on the question paper\.?',
-        r'No additional materials are needed\.?',
-        r'Answer all questions\.?',
-        r'Use a black or dark blue pen[^\n]*',
-        r'Write your name[^\n]*',
-        r'Write your answer[^\n]*',
-        r'Do not use an erasable pen[^\n]*',
-        r'Do not write on any bar codes\.?',
-        r'Calculators must not be used in this paper\.?',
-        r'The total mark for this paper is \d+\.?',
-        r'The number of marks for each question[^\n]*',
-        r'No marks will be awarded for using brand names[^\n]*',
-        r'DC \([^)]+\)\s*\d+(?:/\d+)?',
-        r'©\s*UCLES\s*202\d',
-        r'\[Turn over\]',
-        r'0478/12/M/J/25',
-        r'Permission to reproduce items[^\n]*',
-        r'Cambridge Assessment International Education[^\n]*',
-        r'Local Examinations Syndicate \(UCLES\)[^\n]*',
-        r'DO NOT WRITE IN THIS MARGIN(?:\s+DO NOT WRITE IN THIS MARGIN)*',
-        r'Working space',
-    ]
-    for pat in patterns:
-        text = re.sub(pat, ' ', text, flags=re.IGNORECASE)
-
-    # Remove isolated page numbers
-    text = re.sub(r'(?m)^\s*\d{1,2}\s*$', ' ', text)
-
-    # Remove MCQ decorative letters if they appear alone on lines
-    text = re.sub(r'(?m)^\s*[A-D]\s*$', ' ', text)
-
-    # Remove leftover non-ascii junk that slipped through
-    text = re.sub(r'[^\x09\x0A\x0D\x20-\x7E]', ' ', text)
-
-    # Collapse excessive blank lines, but keep some structure for parsing
-    text = re.sub(r'\n[ \t]+', '\n', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
-
+    """Remove IGCSE boilerplate from question paper text."""
+    text = re.sub(r'0478/\d+[^\n]*', ' ', text)
+    text = re.sub(r'© UCLES 202\d[^\n]*', ' ', text)
+    text = re.sub(r'\[Turn over\]?', ' ', text)
+    text = re.sub(r'DC \(.*?\).*', ' ', text)
+    text = re.sub(r'\* \d[\d ]+\d \*', ' ', text)
+    text = re.sub(r'Working\s+space', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'Cambridge IGCSE[^\n]*', ' ', text)
+    text = re.sub(r'\(cid:\d+\)', ' ', text)
+    text = re.sub(r'\bDFD\b', ' ', text)
+    # Remove standalone page numbers (digit(s) alone on a line)
+    text = re.sub(r'(?m)^\s*\d{1,3}\s*$', ' ', text)
+    # Remove header/footer lines with paper codes or session info
+    text = re.sub(r'(?i)(january|february|march|april|may|june|july|august|september|october|november|december)\s*/?\s*\d{4}[^\n]*', ' ', text)
+    # Remove lines that are purely punctuation or symbols
+    text = re.sub(r'(?m)^\s*[^a-zA-Z0-9\(\)\[\]]{3,}\s*$', ' ', text)
+    # Remove "For Examiner's Use" and similar margin text
+    text = re.sub(r"For\s+Examiner[''s]*\s+Use", ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'BLANK PAGE[^\n]*', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'Do not write[^\n]*', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)  # strip non-ASCII artifacts
+    return text
 
 # ---------- CLEAN QUESTION TEXT ----------
-def clean_question_text(text):
-    """Clean extracted question text without destroying math / binary values."""
-    text = normalize_unicode(text)
-
-    # Remove mark brackets like [2]
-    text = re.sub(r'\[\d+\]', ' ', text)
-
-    # Remove long answer lines / dot leaders
-    text = re.sub(r'\.{3,}', ' ', text)
-
-    # Remove leftover repeated margin/footer fragments
-    text = re.sub(r'DO NOT WRITE IN THIS MARGIN(?:\s+DO NOT WRITE IN THIS MARGIN)*', ' ', text, flags=re.IGNORECASE)
-    text = re.sub(r'\bWorking space\b', ' ', text, flags=re.IGNORECASE)
-
-    # Remove stray isolated page number at start/end
-    text = re.sub(r'^\s*\d{1,2}\s+', '', text)
-    text = re.sub(r'\s+\d{1,2}\s*$', '', text)
-
-    # Remove obvious barcode remnants and odd junk tokens
-    text = re.sub(r'\*\s*[0-9 ]+\s*\*', ' ', text)
-    text = re.sub(r'[^\x09\x0A\x0D\x20-\x7E]', ' ', text)
-
-    # Normalise whitespace
-    text = re.sub(r'[ \t]+', ' ', text)
-    text = re.sub(r' *\n *', '\n', text)
-    text = re.sub(r'\n{2,}', '\n', text)
-
+def clean_text(text):
+    """Remove dot-lines, mark brackets, garbage fragments and normalise whitespace."""
+    text = re.sub(r'\.{3,}', '', text)           # dot leaders
+    text = re.sub(r'\[\d+\]', '', text)           # mark allocations [2]
+    text = re.sub(r'\(\d+\)', '', text)           # mark allocations (2)
+    # Remove isolated single letters that are not sub-question labels
+    text = re.sub(r'(?<!\w)[B-HJ-UW-Z](?!\w)', '', text)
+    # Remove residual page numbers mid-text
+    text = re.sub(r'(?<!\w)\d{1,3}(?!\w)', lambda m: '' if int(m.group()) < 50 and len(m.group()) <= 2 else m.group(), text)
+    text = re.sub(r'\s+', ' ', text)
     return text.strip()
-
-
-def remove_trailing_mcq_options(text):
-    """
-    For MCQ-style stems like 2(a), remove trailing option lines from the question text.
-    Example:
-      A input
-      B output
-      C process
-      D storage
-    """
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    kept = []
-    for line in lines:
-        if re.fullmatch(r'[A-D]\s+.+', line):
-            break
-        kept.append(line)
-    return "\n".join(kept).strip()
-
 
 # ---------- PARSE QUESTION PAPER ----------
 def parse_qp(raw_text):
     """
-    Parse Cambridge question paper into:
-    [{"question": "1(a)", "question_text": "..."}, ...]
+    Parse the IGCSE question paper into structured question objects.
 
-    Fixes garbage attachment by:
-    1. removing margin/header/footer/barcode noise aggressively
-    2. cutting content before obvious page-end junk
-    3. trimming option blocks and answer-space artifacts
+    Key insight: PyMuPDF emits question numbers as  '\\n1 \\n', '\\n2 \\n'
+    (digit + trailing space + newline), whereas page numbers appear as
+    '\\n2\\n' (digit, NO trailing space).  We split on the question-number
+    pattern only, so page numbers are never mistaken for question numbers.
+
+    Sub-questions use letters (a-h) and sub-sub-questions use roman
+    numerals.  We deliberately avoid [a-z] for sub-letters because (i),
+    (ii) etc. would collide with roman-numeral sub-sub-question markers.
     """
     text = strip_qp_noise(raw_text)
     questions = []
 
-    # Main questions start at line beginning: 1, 2, 3 ...
-    main_pattern = re.compile(r'(?m)^\s*(\d{1,2})\s+')
-    main_matches = list(main_pattern.finditer(text))
+    # Split on main question numbers: \n<digits><space>\n
+    main_pattern = re.compile(r'\n\s*(\d{1,2}) \n')
+    parts = main_pattern.split(text)
 
-    for i, m in enumerate(main_matches):
-        q_num = int(m.group(1))
-        if not (1 <= q_num <= 40):
+    # parts = [preamble, "1", block1, "2", block2, ...]
+    for i in range(1, len(parts), 2):
+        q_num = int(parts[i])
+        if not (1 <= q_num <= 20):
             continue
 
-        start = m.start()
-        end = main_matches[i + 1].start() if i + 1 < len(main_matches) else len(text)
-        block = text[start:end].strip()
+        block = parts[i + 1] if i + 1 < len(parts) else ""
 
-        # Skip any preamble-like block without subparts
-        sub_matches = list(re.finditer(r'\(([a-z])\)', block))
-        if not sub_matches:
-            continue
+        # Sub-questions: letters a-h only (avoids collision with roman i,v,x)
+        sub_matches = list(re.finditer(r'\(([a-h])\)', block))
 
         for s_idx, s_match in enumerate(sub_matches):
             sub_id = s_match.group(1)
             sub_start = s_match.start()
-            sub_end = sub_matches[s_idx + 1].start() if s_idx + 1 < len(sub_matches) else len(block)
-            sub_text = block[sub_start:sub_end].strip()
+            sub_end = (sub_matches[s_idx + 1].start()
+                       if s_idx + 1 < len(sub_matches) else len(block))
 
-            # Split sub-subparts such as (i), (ii), (iii)
-            ss_matches = list(re.finditer(r'\(((?:ix)|(?:iv)|(?:v?i{1,3})|x)\)', sub_text))
+            sub_text = block[sub_start:sub_end]
+
+            # Sub-sub-questions: roman numerals (i), (ii), (iii), (iv)...
+            ss_matches = list(re.finditer(
+                r'\((i{1,3}|iv|vi{0,3}|ix|xi{0,3})\)', sub_text))
 
             if ss_matches:
                 for ss_idx, ss_match in enumerate(ss_matches):
                     ss_id = ss_match.group(1)
                     ss_start = ss_match.start()
-                    ss_end = ss_matches[ss_idx + 1].start() if ss_idx + 1 < len(ss_matches) else len(sub_text)
-                    ss_text = sub_text[ss_start:ss_end].strip()
+                    ss_end = (ss_matches[ss_idx + 1].start()
+                              if ss_idx + 1 < len(ss_matches) else len(sub_text))
 
-                    cleaned = clean_question_text(ss_text)
-                    cleaned = remove_trailing_mcq_options(cleaned)
+                    ss_text = sub_text[ss_start:ss_end]
                     qid = f"{q_num}({sub_id})({ss_id})"
-
+                    cleaned = clean_text(ss_text)
                     if len(cleaned) > 10:
-                        questions.append({
-                            "question": qid,
-                            "question_text": cleaned
-                        })
+                        questions.append({"question": qid,
+                                          "question_text": cleaned})
             else:
-                cleaned = clean_question_text(sub_text)
-                cleaned = remove_trailing_mcq_options(cleaned)
                 qid = f"{q_num}({sub_id})"
-
+                cleaned = clean_text(sub_text)
+                # Remove MCQ option lines (A ... B ... C ... D ...)
+                cleaned = re.sub(r'\b[A-D] [A-Za-z].*', '', cleaned)
+                # Remove any remaining garbage fragments:
+                # lines that are fewer than 3 words and contain no verb-like content
+                lines = cleaned.split('.')
+                cleaned = '. '.join(
+                    line for line in lines
+                    if len(line.split()) >= 3 or any(c.isalpha() for c in line)
+                )
+                cleaned = re.sub(r'\s+', ' ', cleaned).strip()
                 if len(cleaned) > 10:
-                    questions.append({
-                        "question": qid,
-                        "question_text": cleaned
-                    })
+                    questions.append({"question": qid,
+                                      "question_text": cleaned})
 
-    # Deduplicate - first clean occurrence wins
+    # Deduplicate - first occurrence wins
     unique = {}
     for q in questions:
         if q["question"] not in unique:
@@ -274,49 +146,40 @@ def parse_qp(raw_text):
 
     return list(unique.values())
 
-
 # ---------- STRIP MS NOISE ----------
 def strip_ms_noise(text):
     """Remove mark-scheme headers and mark-count columns."""
-    text = normalize_unicode(text)
-    text = remove_binary_garbage(text)
-
-    patterns = [
-        r'0478/12[^\n]*',
-        r'Cambridge IGCSE[^\n]*Mark Scheme[^\n]*',
-        r'PUBLISHED',
-        r'May/June 2025',
-        r'© Cambridge University Press[^\n]*',
-        r'Page \d+ of \d+',
-        r'Generic Marking Principles[\s\S]*?Question\s+Answer\s+Marks',
-        r'Annotations guidance for centres[\s\S]*?Question\s+Answer\s+Marks',
-        r'Question\s+Answer\s+Marks',
-        r'Annotation Meaning[^\n]*',
-        r'Annotations',
-        r'Examples:',
-    ]
-    for pat in patterns:
-        text = re.sub(pat, ' ', text, flags=re.IGNORECASE)
-
-    # Standalone marks column numbers
+    text = re.sub(r'0478/\d+[^\n]*', ' ', text)
+    text = re.sub(r'Cambridge IGCSE[^\n]*PUBLISHED[^\n]*', ' ', text)
+    text = re.sub(r'© Cambridge University Press[^\n]*', ' ', text)
+    text = re.sub(r'(?i)(january|february|march|april|may|june|july|august|september|october|november|december)\s*/?\s*\d{4}\s*', ' ', text)
+    text = re.sub(r'Page \d+ of \d+\s*', ' ', text)
+    text = re.sub(r'Question\s+Answer\s+Marks', ' ', text)
+    text = re.sub(r'\bAnswer\b\s+\bMarks\b', ' ', text)
+    # Standalone mark-count numbers on their own line
     text = re.sub(r'(?m)^\s*\d{1,2}\s*$', ' ', text)
-
-    # Remove leftover non-ascii junk
-    text = re.sub(r'[^\x09\x0A\x0D\x20-\x7E]', ' ', text)
-    text = re.sub(r'\n[ \t]+', '\n', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
-
+    text = re.sub(r'\(cid:\d+\)', ' ', text)
+    text = re.sub(r'\f', ' ', text)
+    # Remove "Accept / Do not accept" style markers that bleed between answers
+    text = re.sub(r'(?i)\b(accept|do not accept|allow|reject|ignore|must see)\b[^\n]*', lambda m: m.group(), text)
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)
+    return text
 
 # ---------- PARSE MARK SCHEME ----------
 def parse_ms(raw_text):
     """
     Parse the mark scheme PDF into:
-    [{"question": "1(a)", "answer": "..."}, ...]
+    [{ "question": "1(a)", "answer": "..." }, ...]
     """
     text = strip_ms_noise(raw_text)
 
-    q_pattern = re.compile(r'(?<!\w)(\d+\([a-z]\)(?:\([ivx]+\))?)(?!\w)')
+    # Match labels like 1(a) or 1(e)(i)
+    q_pattern = re.compile(
+        r'(?<!\w)'
+        r'(\d+\([a-z]\)(?:\([ivx]+\))?)'
+        r'(?!\w)'
+    )
+
     matches = list(q_pattern.finditer(text))
     answers = []
 
@@ -324,13 +187,17 @@ def parse_ms(raw_text):
         q_label = m.group(1).strip()
         ans_start = m.end()
         ans_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+
         raw_answer = text[ans_start:ans_end]
-
+        raw_answer = re.sub(r'\s+', ' ', raw_answer)
         answer = raw_answer.strip()
-        answer = re.sub(r'\s+', ' ', answer)
 
-        # Remove trailing lone mark-count residue if present
+        # Remove trailing lone digit (residual mark count)
         answer = re.sub(r'\s+\d{1,2}$', '', answer).strip()
+
+        # Remove leading/trailing noise tokens (e.g. bare punctuation, lone letters)
+        answer = re.sub(r'^[\s;:,/\\|]+', '', answer).strip()
+        answer = re.sub(r'[\s;:,/\\|]+$', '', answer).strip()
 
         answers.append({"question": q_label, "answer": answer})
 
@@ -343,7 +210,6 @@ def parse_ms(raw_text):
 
     return list(unique.values())
 
-
 # ---------- MAP TOPIC ----------
 def map_topic(text):
     for topic, keywords in TOPICS.items():
@@ -351,7 +217,6 @@ def map_topic(text):
             if word.lower() in text.lower():
                 return topic
     return "General"
-
 
 # ---------- MERGE ----------
 def merge(qp, ms):
@@ -364,10 +229,8 @@ def merge(qp, ms):
 
         # Fallback: collect answers from child questions e.g. 1(e)(i), 1(e)(ii)
         if not ans:
-            child_answers = [
-                ms_ans for ms_key, ms_ans in ms_dict.items()
-                if ms_key.startswith(q_key + "(")
-            ]
+            child_answers = [ms_ans for ms_key, ms_ans in ms_dict.items()
+                             if ms_key.startswith(q_key + "(")]
             if child_answers:
                 ans = " | ".join(child_answers)
 
@@ -380,7 +243,6 @@ def merge(qp, ms):
 
     return result
 
-
 # ---------- SAVE ----------
 def save_to_db(data, paper_name):
     for item in data:
@@ -392,17 +254,14 @@ def save_to_db(data, paper_name):
             "topic": item.get("topic", "General")
         }).execute()
 
-
 # ---------- ROUTES ----------
 @app.route("/")
 def index():
     return render_template("index.html")
 
-
 @app.route("/practice")
 def practice_page():
     return render_template("practice.html")
-
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -411,11 +270,8 @@ def upload():
         ms_file = request.files["ms"]
         paper_name = qp_file.filename
 
-        qp_pages = extract_text_pages(qp_file, crop=True)
-        ms_pages = extract_text_pages(ms_file, crop=True)
-
-        qp_text = "\n".join(qp_pages)
-        ms_text = "\n".join(ms_pages)
+        qp_text = extract_text(qp_file)
+        ms_text = extract_text(ms_file)
 
         qp_data = parse_qp(qp_text)
         ms_data = parse_ms(ms_text)
@@ -432,29 +288,41 @@ def upload():
         print("ERROR:", str(e))
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/topics")
 def get_topics():
     response = supabase.table("questions").select("topic").execute()
     topics = list(set([item["topic"] for item in response.data]))
     return jsonify(topics)
 
-
 @app.route("/practice/<topic>")
 def practice(topic):
     response = supabase.table("questions").select("*").eq("topic", topic).execute()
     return jsonify(response.data)
 
-
 @app.route("/feedback", methods=["POST"])
 def feedback():
+    # Common stopwords to exclude from keyword matching
+    STOPWORDS = {
+        "the", "and", "that", "this", "with", "from", "have", "which",
+        "will", "when", "what", "where", "there", "their", "they", "than",
+        "then", "each", "such", "into", "used", "uses", "using", "would",
+        "could", "should", "about", "after", "before", "other", "also",
+        "more", "some", "been", "were", "being", "because", "while"
+    }
+
     data = request.json
     student = data.get("student", "").lower()
     correct = data.get("correct", "").lower()
 
-    keywords = list(set([word for word in correct.split() if len(word) > 4]))
+    # Only keep meaningful keywords (length > 4 and not stopwords)
+    keywords = list(set([
+        word for word in re.findall(r'[a-z]+', correct)
+        if len(word) > 4 and word not in STOPWORDS
+    ]))
+
     matched = [k for k in keywords if k in student]
     missing = [k for k in keywords if k not in student]
+
     total = len(keywords)
     score = len(matched)
     marks = min(4, round((score / total) * 4)) if total > 0 else 0
@@ -481,7 +349,6 @@ def feedback():
         "highlighted": highlighted,
         "model": correct
     })
-
 
 if __name__ == "__main__":
     app.run(debug=True)
