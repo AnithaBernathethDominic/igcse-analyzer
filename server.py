@@ -332,50 +332,114 @@ def practice(topic):
 
 @app.route("/feedback", methods=["POST"])
 def feedback():
+    """
+    Concept-based scoring:
+    - Splits mark-scheme answer into individual marking concepts
+      (separated by // ; or sentence boundaries).
+    - A concept is "matched" if the student hits >= 25% of its keywords.
+    - Each matched concept = 1 mark, capped at inferred max marks.
+    - Correctly handles "Any one from:" / "Two from:" preambles.
+    """
+
     STOPWORDS = {
         "the", "and", "that", "this", "with", "from", "have", "which",
         "will", "when", "what", "where", "there", "their", "they", "than",
-        "then", "each", "such", "into", "used", "uses", "using", "would",
+        "then", "each", "such", "into", "uses", "using", "would",
         "could", "should", "about", "after", "before", "other", "also",
-        "more", "some", "been", "were", "being", "because", "while"
+        "more", "some", "been", "were", "being", "because", "while",
+        "any", "give", "state", "explain", "describe", "must", "not",
+        "can", "per", "are", "has", "had", "used", "for", "its"
     }
-    data = request.json
-    student = data.get("student", "").lower()
-    correct = data.get("correct", "").lower()
 
-    keywords = list(set([
-        word for word in re.findall(r'[a-z]+', correct)
-        if len(word) > 4 and word not in STOPWORDS
-    ]))
+    def split_into_concepts(answer):
+        """Split MS answer into individual marking point strings."""
+        clean = re.sub(
+            r'(?i)^(any|one|two|three|four|five)\s+(mark[s]?\s+)?(from|for\s+each)[:\s]*',
+            '', answer.strip())
+        # Primary split: explicit // or ;
+        parts = re.split(r'\s*//\s*|\s*;\s*', clean)
+        # If only 1 part, try sentence-boundary split
+        if len(parts) == 1:
+            parts = re.split(r'(?<=[a-z]{3})\.\s+(?=[A-Z])', parts[0])
+        return [p.strip() for p in parts if len(p.strip()) > 6]
 
-    matched = [k for k in keywords if k in student]
-    missing = [k for k in keywords if k not in student]
+    def extract_max_marks(answer):
+        """Infer max marks from preamble like 'Any two from:' or 'Two from:'."""
+        nums = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+                '1': 1, '2': 2, '3': 3, '4': 4, '5': 5}
+        m = re.match(r'(?i)any\s+(\w+)\s+from', answer.strip())
+        if m:
+            return nums.get(m.group(1).lower(), 4)
+        m = re.match(r'(?i)(\w+)\s+from[:\s]', answer.strip())
+        if m:
+            return nums.get(m.group(1).lower(), 4)
+        m = re.match(r'(?i)(\w+)\s+mark', answer.strip())
+        if m:
+            return nums.get(m.group(1).lower(), 4)
+        return 4   # default
 
-    total = len(keywords)
-    score = len(matched)
-    marks = min(4, round((score / total) * 4)) if total > 0 else 0
+    data_in  = request.json
+    student  = data_in.get("student", "").lower()
+    correct  = data_in.get("correct", "")
+    correct_l = correct.lower()
 
+    max_marks = extract_max_marks(correct_l)
+    concepts  = split_into_concepts(correct_l)
+    if not concepts:
+        concepts = [correct_l]
+
+    THRESHOLD = 0.25   # fraction of concept keywords student must match
+
+    matched_concepts = 0
+    all_matched_kws  = []
+    all_missing_kws  = []
+
+    for concept in concepts:
+        kws = list(set([
+            w for w in re.findall(r'[a-z]+', concept)
+            if len(w) > 3 and w not in STOPWORDS
+        ]))
+        if not kws:
+            continue
+        matched = [w for w in kws
+                   if re.search(r'\b' + re.escape(w) + r'\b', student)]
+        ratio = len(matched) / len(kws)
+        if ratio >= THRESHOLD:
+            matched_concepts += 1
+            all_matched_kws.extend(matched)
+        else:
+            all_missing_kws.extend([w for w in kws if w not in matched])
+
+    marks = min(max_marks, matched_concepts)
+    all_matched_kws = list(set(all_matched_kws))
+    all_missing_kws = list(set(all_missing_kws) - set(all_matched_kws))
+
+    # Build highlighted student answer (word-boundary safe)
     highlighted = student
-    for word in matched:
-        highlighted = highlighted.replace(
-            word,
-            f"<span style='color:green;font-weight:bold'>{word}</span>"
+    for word in sorted(all_matched_kws, key=len, reverse=True):
+        highlighted = re.sub(
+            r'\b' + re.escape(word) + r'\b',
+            f"<span style='color:green;font-weight:bold'>{word}</span>",
+            highlighted
         )
 
-    if marks == 4:
+    ratio_overall = marks / max_marks if max_marks > 0 else 0
+    if ratio_overall >= 1.0:
         comment = "Excellent answer. Accurate use of key terminology."
-    elif marks >= 2:
-        comment = "Good attempt. Some key terms missing."
+    elif ratio_overall >= 0.5:
+        comment = "Good attempt. Some key points missing."
+    elif marks > 0:
+        comment = "Partial credit. Expand your answer with more detail."
     else:
-        comment = "Basic response. Needs improvement."
+        comment = "Basic response. Review the model answer and try again."
 
     return jsonify({
-        "marks": f"{marks}/4",
-        "matched": matched[:5],
-        "missing": missing[:5],
-        "comment": comment,
+        "marks":       f"{marks}/{max_marks}",
+        "matched":     all_matched_kws[:6],
+        "missing":     all_missing_kws[:6],
+        "comment":     comment,
         "highlighted": highlighted,
-        "model": correct
+        "model":       correct
     })
 
 if __name__ == "__main__":
