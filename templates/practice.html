@@ -1,175 +1,717 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>IGCSE Practice</title>
-    <style>
-        body {
-            font-family: Arial;
-            background: #f4f6f8;
-            padding: 30px;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IGCSE CS Practice</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:       #0f1117;
+    --paper:     #faf9f6;
+    --cream:     #f0ede6;
+    --accent:    #1a56db;
+    --accent2:   #0e9f6e;
+    --danger:    #e02424;
+    --warn:      #d97706;
+    --border:    #d4cfc6;
+    --muted:     #6b6760;
+    --card:      #ffffff;
+    --shadow:    0 2px 12px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.05);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
+  }
 
-        .container {
-            max-width: 800px;
-            margin: auto;
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
-        }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        h2 {
-            text-align: center;
-        }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+  }
 
-        select, button, textarea {
-            padding: 10px;
-            margin: 10px 5px;
-            font-size: 14px;
-        }
+  /* ---- TOP BAR ---- */
+  header {
+    background: var(--ink);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    height: 56px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.25rem;
+    letter-spacing: 0.01em;
+  }
+  .logo span { color: #60a5fa; }
+  .badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    background: #60a5fa22;
+    color: #93c5fd;
+    border: 1px solid #3b82f620;
+    padding: 2px 8px;
+    border-radius: 100px;
+    text-transform: uppercase;
+  }
 
-        textarea {
-            width: 100%;
-            height: 80px;
-        }
+  /* ---- LAYOUT ---- */
+  .shell {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    min-height: calc(100vh - 56px);
+  }
 
-        #questionBox {
-            background: #eef2ff;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 15px 0;
-        }
+  /* ---- SIDEBAR ---- */
+  aside {
+    background: var(--cream);
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    overflow-y: auto;
+  }
+  .sidebar-title {
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0 20px 12px;
+  }
+  .topic-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: all 0.15s;
+    font-size: 0.9rem;
+    color: var(--ink);
+    user-select: none;
+  }
+  .topic-item:hover { background: #e8e3dc; border-left-color: var(--border); }
+  .topic-item.active {
+    background: var(--card);
+    border-left-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .topic-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  .topic-item.active .topic-dot { background: var(--accent); }
+  .topic-count {
+    margin-left: auto;
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: var(--border);
+    color: var(--muted);
+    padding: 1px 7px;
+    border-radius: 100px;
+  }
+  .topic-item.active .topic-count { background: #dbeafe; color: var(--accent); }
 
-        #feedbackBox {
-            margin-top: 15px;
-            padding: 10px;
-            background: #f9fafb;
-            border-radius: 8px;
-        }
+  /* ---- MAIN PANEL ---- */
+  main {
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 760px;
+  }
 
-        .btn {
-            background: #4f46e5;
-            color: white;
-            border: none;
-            cursor: pointer;
-            border-radius: 5px;
-        }
+  /* ---- EMPTY STATE ---- */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--muted);
+    padding: 80px 0;
+  }
+  .empty-icon { font-size: 3rem; opacity: 0.4; }
+  .empty-state h3 { font-family: 'DM Serif Display', serif; font-size: 1.4rem; color: var(--ink); opacity: 0.5; }
+  .empty-state p { font-size: 0.9rem; }
 
-        .btn:hover {
-            background: #4338ca;
-        }
-    </style>
+  /* ---- PROGRESS BAR ---- */
+  .progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .progress-label {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .progress-bar {
+    flex: 1;
+    height: 5px;
+    background: var(--border);
+    border-radius: 100px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 100px;
+    transition: width 0.4s ease;
+  }
+
+  /* ---- QUESTION CARD ---- */
+  .q-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    box-shadow: var(--shadow);
+    animation: fadeUp 0.25s ease;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .q-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .q-tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: #f0f4ff;
+    color: var(--accent);
+    border: 1px solid #bfdbfe;
+    padding: 3px 9px;
+    border-radius: 6px;
+  }
+  .q-topic-tag {
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: var(--cream);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 3px 9px;
+    border-radius: 6px;
+  }
+  .q-text {
+    font-size: 1rem;
+    line-height: 1.65;
+    color: var(--ink);
+  }
+
+  /* ---- ANSWER INPUT ---- */
+  textarea {
+    width: 100%;
+    min-height: 110px;
+    padding: 14px 16px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    background: var(--card);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    resize: vertical;
+    color: var(--ink);
+    transition: border-color 0.15s;
+    outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  textarea::placeholder { color: #b5b0a8; }
+
+  /* ---- BUTTONS ---- */
+  .btn-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 20px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #1e40af; }
+  .btn-ghost {
+    background: var(--card);
+    color: var(--ink);
+    border: 1.5px solid var(--border);
+  }
+  .btn-ghost:hover { background: var(--cream); }
+  .btn-success { background: var(--accent2); color: #fff; }
+  .btn-success:hover { background: #047857; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* ---- FEEDBACK CARD ---- */
+  .feedback-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    box-shadow: var(--shadow);
+    display: none;
+    flex-direction: column;
+    gap: 14px;
+    animation: fadeUp 0.2s ease;
+  }
+  .feedback-card.visible { display: flex; }
+
+  .score-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .score-circle {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    border: 3px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.3rem;
+    flex-shrink: 0;
+    transition: border-color 0.3s;
+  }
+  .score-circle.good  { border-color: var(--accent2); color: var(--accent2); }
+  .score-circle.mid   { border-color: var(--warn);    color: var(--warn); }
+  .score-circle.low   { border-color: var(--danger);  color: var(--danger); }
+
+  .score-text h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: 2px; }
+  .score-text p  { font-size: 0.82rem; color: var(--muted); }
+
+  .divider { height: 1px; background: var(--border); }
+
+  .fb-section-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .highlighted-answer {
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: var(--ink);
+    padding: 10px 14px;
+    background: var(--cream);
+    border-radius: 8px;
+  }
+  .highlighted-answer .hit  { color: #047857; font-weight: 600; background: #d1fae5; padding: 0 2px; border-radius: 3px; }
+  .highlighted-answer .miss { color: var(--danger); }
+
+  .pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill {
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 100px;
+  }
+  .pill-miss { background: #fee2e2; color: var(--danger); }
+  .pill-hit  { background: #d1fae5; color: #065f46; }
+
+  .model-answer {
+    font-size: 0.88rem;
+    line-height: 1.7;
+    color: var(--ink);
+    padding: 12px 16px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    display: none;
+  }
+  .model-answer.visible { display: block; }
+
+  /* ---- SKELETON / LOADING ---- */
+  .loading-topic {
+    padding: 10px 20px;
+    font-size: 0.85rem;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* ---- RESPONSIVE ---- */
+  @media (max-width: 680px) {
+    .shell { grid-template-columns: 1fr; }
+    aside { border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; }
+    main { padding: 20px 16px; }
+  }
+</style>
 </head>
-
 <body>
 
-<div class="container">
+<header>
+  <div class="logo">IGCSE <span>CS</span> Practice</div>
+  <div class="badge">0478 · Paper 1</div>
+</header>
 
-    <h2>IGCSE Practice</h2>
+<div class="shell">
 
-    <select id="topicSelect"></select>
-    <button class="btn" onclick="loadQuestions()">Start Practice</button>
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <div class="sidebar-title">Topics</div>
+    <div class="loading-topic">Loading topics…</div>
+  </aside>
 
-    <div id="questionBox">Select a topic to begin</div>
+  <!-- MAIN -->
+  <main id="main">
 
-    <textarea id="studentAnswer" placeholder="Type your answer here..."></textarea>
+    <!-- Empty state -->
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">📚</div>
+      <h3>Select a topic</h3>
+      <p>Pick a topic from the left to start practising</p>
+    </div>
 
-    <br>
+    <!-- Practice area (hidden until topic selected) -->
+    <div id="practiceArea" style="display:none; display:none; flex-direction:column; gap:20px;">
 
-    <button class="btn" onclick="checkAnswer()">Check Answer</button>
-    <button class="btn" onclick="showAnswer()">Show Answer</button>
-    <button class="btn" onclick="nextQuestion()">Next</button>
+      <!-- Progress -->
+      <div class="progress-wrap">
+        <span class="progress-label" id="progressLabel">0 / 0</span>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+      </div>
 
-    <div id="feedbackBox"></div>
+      <!-- Question -->
+      <div class="q-card" id="qCard">
+        <div class="q-meta">
+          <span class="q-tag" id="qTag">Q—</span>
+          <span class="q-topic-tag" id="qTopicTag">—</span>
+        </div>
+        <div class="q-text" id="qText">—</div>
+      </div>
 
+      <!-- Answer box -->
+      <textarea id="studentAnswer" placeholder="Write your answer here…"></textarea>
+
+      <!-- Buttons -->
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="checkAnswer()">✓ Check Answer</button>
+        <button class="btn btn-ghost"   onclick="toggleModel()">👁 Show Answer</button>
+        <button class="btn btn-ghost"   onclick="nextQuestion()">→ Next</button>
+      </div>
+
+      <!-- Model answer (toggleable) -->
+      <div class="model-answer" id="modelAnswer"></div>
+
+      <!-- Feedback -->
+      <div class="feedback-card" id="feedbackCard">
+
+        <div class="score-row">
+          <div class="score-circle" id="scoreCircle">—</div>
+          <div class="score-text">
+            <h4 id="scoreComment">—</h4>
+            <p id="scoreSubtext">—</p>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div>
+          <div class="fb-section-label">Your Answer</div>
+          <div class="highlighted-answer" id="highlightedAnswer"></div>
+        </div>
+
+        <div id="missingWrap">
+          <div class="fb-section-label">Keywords Missing</div>
+          <div class="pill-row" id="missingPills"></div>
+        </div>
+
+        <div id="matchedWrap">
+          <div class="fb-section-label">Keywords Matched</div>
+          <div class="pill-row" id="matchedPills"></div>
+        </div>
+
+      </div>
+    </div><!-- /practiceArea -->
+
+  </main>
 </div>
 
 <script>
-let questions = [];
-let current = 0;
+// ---- STATE ----
+let questions   = [];
+let current     = 0;
+let modelShown  = false;
+let topicCounts = {};   // topic -> count
 
-async function loadTopics() {
-    let res = await fetch("/topics");
-    let data = await res.json();
+// ---- TOPIC COLOURS (cycle) ----
+const DOT_COLORS = [
+  '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
+  '#ec4899','#06b6d4','#84cc16','#f97316','#6366f1'
+];
 
-    let select = document.getElementById("topicSelect");
-
-    data.forEach(t => {
-        let opt = document.createElement("option");
-        opt.value = t;
-        opt.innerText = t;
-        select.appendChild(opt);
-    });
-}
-
-async function loadQuestions() {
-    let topic = document.getElementById("topicSelect").value;
-
-    let res = await fetch(`/practice/${topic}`);
-    questions = await res.json();
-
-    console.log("Questions:", questions);
-
-    current = 0;
-    showQuestion();
-}
-
-function showQuestion() {
-    if (questions.length === 0) {
-        document.getElementById("questionBox").innerText = "No questions found";
-        return;
+// ---- BOOT ----
+async function boot() {
+  try {
+    // Load counts per topic
+    const countRes = await fetch('/topics/counts');
+    if (countRes.ok) {
+      topicCounts = await countRes.json();
     }
+  } catch(_) {}
 
-    let q = questions[current];
-
-    document.getElementById("questionBox").innerText =
-        q.question_no + " " + q.question_text;
-
-    document.getElementById("studentAnswer").value = "";
-    document.getElementById("feedbackBox").innerHTML = "";
+  const res  = await fetch('/topics');
+  const data = await res.json();
+  renderSidebar(data);
 }
 
-function showAnswer() {
-    document.getElementById("feedbackBox").innerHTML =
-        "<b>Model Answer:</b><br>" + questions[current].answer;
+function renderSidebar(topics) {
+  const aside = document.getElementById('sidebar');
+  aside.innerHTML = '<div class="sidebar-title">Topics</div>';
+
+  if (!topics.length) {
+    aside.innerHTML += '<div class="loading-topic">No topics found. Upload a paper first.</div>';
+    return;
+  }
+
+  topics.sort().forEach((t, idx) => {
+    const item  = document.createElement('div');
+    item.className = 'topic-item';
+    item.dataset.topic = t;
+
+    const dot = document.createElement('div');
+    dot.className = 'topic-dot';
+    dot.style.background = DOT_COLORS[idx % DOT_COLORS.length];
+
+    const name  = document.createElement('span');
+    name.textContent = t;
+
+    const count = document.createElement('span');
+    count.className = 'topic-count';
+    count.textContent = topicCounts[t] ?? '';
+    count.id = `count-${t}`;
+
+    item.appendChild(dot);
+    item.appendChild(name);
+    item.appendChild(count);
+    item.onclick = () => selectTopic(t, item);
+    aside.appendChild(item);
+  });
 }
 
+// ---- SELECT TOPIC ----
+async function selectTopic(topic, el) {
+  // Highlight sidebar
+  document.querySelectorAll('.topic-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+
+  // Load questions
+  const res = await fetch(`/practice/${encodeURIComponent(topic)}`);
+  questions = await res.json();
+  current   = 0;
+  modelShown = false;
+
+  if (!questions.length) {
+    showEmpty('No questions found for this topic.');
+    return;
+  }
+
+  // Update count badge
+  const countEl = document.getElementById(`count-${topic}`);
+  if (countEl) countEl.textContent = questions.length;
+
+  showPracticeArea();
+  renderQuestion();
+}
+
+// ---- SHOW / HIDE AREAS ----
+function showPracticeArea() {
+  document.getElementById('emptyState').style.display    = 'none';
+  const pa = document.getElementById('practiceArea');
+  pa.style.display = 'flex';
+}
+function showEmpty(msg) {
+  const pa = document.getElementById('practiceArea');
+  pa.style.display = 'none';
+  const es = document.getElementById('emptyState');
+  es.style.display = 'flex';
+  es.querySelector('p').textContent = msg || 'Pick a topic from the left';
+}
+
+// ---- RENDER QUESTION ----
+function renderQuestion() {
+  if (!questions.length) return;
+
+  const q = questions[current];
+
+  // Strip leading "(a)" / "(b)(i)" prefix from question_text if it duplicates the question_no
+  let txt = q.question_text || '';
+  txt = txt.replace(/^\([a-h]\)\s*/,'').replace(/^\([ivx]+\)\s*/,'').trim();
+
+  document.getElementById('qTag').textContent      = q.question_no || '—';
+  document.getElementById('qTopicTag').textContent = q.topic       || '—';
+  document.getElementById('qText').textContent     = txt;
+
+  // Progress
+  const pct = ((current) / questions.length) * 100;
+  document.getElementById('progressLabel').textContent = `${current + 1} / ${questions.length}`;
+  document.getElementById('progressFill').style.width  = pct + '%';
+
+  // Reset UI
+  document.getElementById('studentAnswer').value   = '';
+  document.getElementById('feedbackCard').classList.remove('visible');
+  document.getElementById('modelAnswer').classList.remove('visible');
+  document.getElementById('modelAnswer').textContent = '';
+  modelShown = false;
+}
+
+// ---- SHOW / HIDE MODEL ANSWER ----
+function toggleModel() {
+  const ma = document.getElementById('modelAnswer');
+  if (modelShown) {
+    ma.classList.remove('visible');
+    modelShown = false;
+  } else {
+    const q = questions[current];
+    ma.textContent = q.answer || 'No model answer available.';
+    ma.classList.add('visible');
+    modelShown = true;
+  }
+}
+
+// ---- NEXT ----
 function nextQuestion() {
-    current++;
-    if (current < questions.length) {
-        showQuestion();
-    } else {
-        alert("Finished!");
-    }
+  current++;
+  if (current < questions.length) {
+    renderQuestion();
+    // Update progress fill after render
+    const pct = (current / questions.length) * 100;
+    document.getElementById('progressFill').style.width = pct + '%';
+  } else {
+    showDone();
+  }
 }
 
+function showDone() {
+  document.getElementById('qText').textContent = '🎉 You\'ve completed all questions in this topic!';
+  document.getElementById('qTag').textContent  = 'Done';
+  document.getElementById('studentAnswer').value = '';
+  document.getElementById('feedbackCard').classList.remove('visible');
+  document.getElementById('progressFill').style.width = '100%';
+  document.getElementById('progressLabel').textContent = `${questions.length} / ${questions.length}`;
+}
+
+// ---- CHECK ANSWER ----
 async function checkAnswer() {
-    let studentAnswer = document.getElementById("studentAnswer").value;
-    let correctAnswer = questions[current].answer;
+  const student = document.getElementById('studentAnswer').value.trim();
+  if (!student) {
+    document.getElementById('studentAnswer').focus();
+    return;
+  }
 
-    let res = await fetch("/feedback", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            student: studentAnswer,
-            correct: correctAnswer
-        })
-    });
+  const q       = questions[current];
+  const correct = q.answer || '';
 
-    let data = await res.json();
+  const res  = await fetch('/feedback', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ student, correct })
+  });
+  const data = await res.json();
 
-    document.getElementById("feedbackBox").innerHTML = `
-        <p><b>Your Answer:</b><br>${data.highlighted}</p>
-        <p><b>Marks:</b> ${data.marks}</p>
-        <p><b>Missing:</b> <span style="color:red">${data.missing.join(", ")}</span></p>
-        <p><b>Comment:</b> ${data.comment}</p>
-    `;
+  renderFeedback(data, student);
 }
 
-loadTopics();
-</script>
+// ---- RENDER FEEDBACK ----
+function renderFeedback(data, studentRaw) {
+  const card = document.getElementById('feedbackCard');
 
+  // Parse marks  e.g. "3/4"
+  const parts   = (data.marks || '0/4').split('/');
+  const scored  = parseInt(parts[0]) || 0;
+  const total   = parseInt(parts[1]) || 4;
+  const ratio   = total > 0 ? scored / total : 0;
+
+  // Score circle
+  const circle = document.getElementById('scoreCircle');
+  circle.textContent = data.marks || '—';
+  circle.className   = 'score-circle';
+  if      (ratio >= 0.75) circle.classList.add('good');
+  else if (ratio >= 0.40) circle.classList.add('mid');
+  else                    circle.classList.add('low');
+
+  document.getElementById('scoreComment').textContent = data.comment || '';
+  document.getElementById('scoreSubtext').textContent =
+    scored === total ? 'Full marks — excellent!' :
+    scored === 0     ? 'Keep revising — you can do it' :
+    `${total - scored} mark${total - scored !== 1 ? 's' : ''} left to earn`;
+
+  // Highlighted answer — use server-provided highlighted HTML but sanitise
+  const hiDiv = document.getElementById('highlightedAnswer');
+  // Replace the server's <span style=...> with our CSS classes
+  let hiHtml = data.highlighted || escHtml(studentRaw);
+  hiHtml = hiHtml.replace(
+    /<span style=['"]color:green[^'"]*['"]>(.*?)<\/span>/gi,
+    '<span class="hit">$1</span>'
+  );
+  hiDiv.innerHTML = hiHtml;
+
+  // Missing pills
+  const missPills = document.getElementById('missingPills');
+  const missWrap  = document.getElementById('missingWrap');
+  missPills.innerHTML = '';
+  if (data.missing && data.missing.length) {
+    data.missing.forEach(w => {
+      const p = document.createElement('span');
+      p.className   = 'pill pill-miss';
+      p.textContent = w;
+      missPills.appendChild(p);
+    });
+    missWrap.style.display = 'block';
+  } else {
+    missWrap.style.display = 'none';
+  }
+
+  // Matched pills
+  const hitPills  = document.getElementById('matchedPills');
+  const hitWrap   = document.getElementById('matchedWrap');
+  hitPills.innerHTML = '';
+  if (data.matched && data.matched.length) {
+    data.matched.forEach(w => {
+      const p = document.createElement('span');
+      p.className   = 'pill pill-hit';
+      p.textContent = w;
+      hitPills.appendChild(p);
+    });
+    hitWrap.style.display = 'block';
+  } else {
+    hitWrap.style.display = 'none';
+  }
+
+  card.classList.add('visible');
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+boot();
+</script>
 </body>
 </html>
