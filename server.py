@@ -3,6 +3,7 @@ import re
 import json
 import os
 import fitz  # PyMuPDF
+import anthropic
 from supabase import create_client
 
 app = Flask(__name__)
@@ -333,111 +334,172 @@ def practice(topic):
 @app.route("/feedback", methods=["POST"])
 def feedback():
     """
-    Concept-based scoring:
-    - Splits mark-scheme answer into individual marking concepts
-      (separated by // ; or sentence boundaries).
-    - A concept is "matched" if the student hits >= 25% of its keywords.
-    - Each matched concept = 1 mark, capped at inferred max marks.
-    - Correctly handles "Any one from:" / "Two from:" preambles.
+    AI-powered feedback using Claude (claude-haiku-4-5-20251001).
+    Claude acts as an IGCSE examiner, reads the mark scheme,
+    and returns structured JSON with marks, matched/missing points,
+    a highlighted answer, and an examiner comment.
+
+    Falls back to keyword heuristic if the API call fails.
     """
+    import html as html_lib
 
-    STOPWORDS = {
-        "the", "and", "that", "this", "with", "from", "have", "which",
-        "will", "when", "what", "where", "there", "their", "they", "than",
-        "then", "each", "such", "into", "uses", "using", "would",
-        "could", "should", "about", "after", "before", "other", "also",
-        "more", "some", "been", "were", "being", "because", "while",
-        "any", "give", "state", "explain", "describe", "must", "not",
-        "can", "per", "are", "has", "had", "used", "for", "its"
-    }
+    data_in = request.json
+    student  = data_in.get("student", "").strip()
+    correct  = data_in.get("correct", "").strip()
+    question = data_in.get("question_text", "").strip()   # optional, sent by frontend
 
-    def split_into_concepts(answer):
-        """Split MS answer into individual marking point strings."""
-        clean = re.sub(
-            r'(?i)^(any|one|two|three|four|five)\s+(mark[s]?\s+)?(from|for\s+each)[:\s]*',
-            '', answer.strip())
-        # Primary split: explicit // or ;
-        parts = re.split(r'\s*//\s*|\s*;\s*', clean)
-        # If only 1 part, try sentence-boundary split
-        if len(parts) == 1:
-            parts = re.split(r'(?<=[a-z]{3})\.\s+(?=[A-Z])', parts[0])
-        return [p.strip() for p in parts if len(p.strip()) > 6]
+    # ------------------------------------------------------------------ #
+    #  AI EVALUATION                                                       #
+    # ------------------------------------------------------------------ #
+    def ai_evaluate(student_ans, mark_scheme, q_text):
+        """Call Claude to evaluate the student answer against the mark scheme."""
 
-    def extract_max_marks(answer):
-        """Infer max marks from preamble like 'Any two from:' or 'Two from:'."""
-        nums = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-                '1': 1, '2': 2, '3': 3, '4': 4, '5': 5}
-        m = re.match(r'(?i)any\s+(\w+)\s+from', answer.strip())
-        if m:
-            return nums.get(m.group(1).lower(), 4)
-        m = re.match(r'(?i)(\w+)\s+from[:\s]', answer.strip())
-        if m:
-            return nums.get(m.group(1).lower(), 4)
-        m = re.match(r'(?i)(\w+)\s+mark', answer.strip())
-        if m:
-            return nums.get(m.group(1).lower(), 4)
-        return 4   # default
+        system_prompt = """You are a strict but fair IGCSE Computer Science examiner (Cambridge 0478).
+Your job is to mark a student's answer against the official mark scheme.
 
-    data_in  = request.json
-    student  = data_in.get("student", "").lower()
-    correct  = data_in.get("correct", "")
-    correct_l = correct.lower()
+Rules you MUST follow:
+1. A single vague word like "data" or "yes" is NEVER worth a mark on its own — the student must demonstrate understanding.
+2. Award 1 mark per distinct correct point that matches a mark scheme concept.
+3. The student does not need to use exact wording — credit correct ideas expressed in their own words.
+4. Do NOT award marks for restating the question or for irrelevant/incorrect statements.
+5. Infer the maximum marks from the mark scheme preamble (e.g. "Any one from:" = 1 mark, "Two from:" = 2 marks). Default to 4 if unclear.
 
-    max_marks = extract_max_marks(correct_l)
-    concepts  = split_into_concepts(correct_l)
-    if not concepts:
-        concepts = [correct_l]
+You MUST respond with ONLY a valid JSON object — no explanation, no markdown, no extra text.
 
-    THRESHOLD = 0.25   # fraction of concept keywords student must match
+JSON schema:
+{
+  "marks_awarded": <integer>,
+  "max_marks": <integer>,
+  "comment": "<one sentence examiner feedback>",
+  "matched_points": ["<point the student correctly made>", ...],
+  "missing_points": ["<key concept the student missed>", ...],
+  "highlighted_answer": "<student answer with <mark> tags around correct parts>"
+}
 
-    matched_concepts = 0
-    all_matched_kws  = []
-    all_missing_kws  = []
+For highlighted_answer: wrap each correct phrase/word in the student's answer with <mark class='hit'>...</mark>.
+Leave incorrect or irrelevant parts as plain text.
+"""
 
-    for concept in concepts:
-        kws = list(set([
-            w for w in re.findall(r'[a-z]+', concept)
-            if len(w) > 3 and w not in STOPWORDS
-        ]))
-        if not kws:
-            continue
-        matched = [w for w in kws
-                   if re.search(r'\b' + re.escape(w) + r'\b', student)]
-        ratio = len(matched) / len(kws)
-        if ratio >= THRESHOLD:
-            matched_concepts += 1
-            all_matched_kws.extend(matched)
-        else:
-            all_missing_kws.extend([w for w in kws if w not in matched])
+        user_prompt = f"""Question: {q_text if q_text else '(not provided)'}
 
-    marks = min(max_marks, matched_concepts)
-    all_matched_kws = list(set(all_matched_kws))
-    all_missing_kws = list(set(all_missing_kws) - set(all_matched_kws))
+Mark Scheme:
+{mark_scheme}
 
-    # Build highlighted student answer (word-boundary safe)
-    highlighted = student
-    for word in sorted(all_matched_kws, key=len, reverse=True):
-        highlighted = re.sub(
-            r'\b' + re.escape(word) + r'\b',
-            f"<span style='color:green;font-weight:bold'>{word}</span>",
-            highlighted
+Student Answer:
+{student_ans}
+
+Mark this answer strictly and return only the JSON."""
+
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+            messages=[{"role": "user", "content": user_prompt}],
+            system=system_prompt
         )
 
-    ratio_overall = marks / max_marks if max_marks > 0 else 0
-    if ratio_overall >= 1.0:
-        comment = "Excellent answer. Accurate use of key terminology."
-    elif ratio_overall >= 0.5:
-        comment = "Good attempt. Some key points missing."
-    elif marks > 0:
-        comment = "Partial credit. Expand your answer with more detail."
-    else:
-        comment = "Basic response. Review the model answer and try again."
+        raw = message.content[0].text.strip()
+        # Strip any accidental markdown fences
+        raw = re.sub(r'^```(?:json)?\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+        return json.loads(raw)
+
+    # ------------------------------------------------------------------ #
+    #  FALLBACK heuristic (if AI unavailable)                             #
+    # ------------------------------------------------------------------ #
+    def heuristic_evaluate(student_ans, mark_scheme):
+        STOPWORDS = {
+            "the","and","that","this","with","from","have","which","will","when",
+            "what","where","there","their","they","than","then","each","such",
+            "into","uses","using","would","could","should","about","after",
+            "before","other","also","more","some","been","were","being",
+            "because","while","any","give","state","explain","describe",
+            "must","not","can","per","are","has","had","used","for","its"
+        }
+
+        def extract_max_marks(ans):
+            nums = {'one':1,'two':2,'three':3,'four':4,'five':5,'1':1,'2':2,'3':3,'4':4,'5':5}
+            m = re.match(r'(?i)any\s+(\w+)\s+from', ans.strip())
+            if m: return nums.get(m.group(1).lower(), 4)
+            m = re.match(r'(?i)(\w+)\s+from[:\s]', ans.strip())
+            if m: return nums.get(m.group(1).lower(), 4)
+            m = re.match(r'(?i)(\w+)\s+mark', ans.strip())
+            if m: return nums.get(m.group(1).lower(), 4)
+            return 4
+
+        def split_concepts(ans):
+            clean = re.sub(r'(?i)^(any|one|two|three|four|five)\s+(mark[s]?\s+)?(from|for\s+each)[:\s]*','',ans.strip())
+            parts = re.split(r'\s*//\s*|\s*;\s*', clean)
+            if len(parts) == 1:
+                parts = re.split(r'(?<=[a-z]{3})\.\s+(?=[A-Z])', parts[0])
+            return [p.strip() for p in parts if len(p.strip()) > 6]
+
+        student_l = student_ans.lower()
+        max_marks = extract_max_marks(mark_scheme.lower())
+        concepts  = split_concepts(mark_scheme.lower()) or [mark_scheme.lower()]
+
+        matched_c, all_hit, all_miss = 0, [], []
+        for concept in concepts:
+            kws = list(set([w for w in re.findall(r'[a-z]+', concept)
+                            if len(w) > 3 and w not in STOPWORDS]))
+            if not kws: continue
+            # Require minimum 2 keywords OR a long keyword match to avoid single-word abuse
+            matched = [w for w in kws if re.search(r'\b'+re.escape(w)+r'\b', student_l)]
+            ratio   = len(matched)/len(kws)
+            if ratio >= 0.35 and (len(matched) >= 2 or any(len(w) > 6 for w in matched)):
+                matched_c += 1
+                all_hit.extend(matched)
+            else:
+                all_miss.extend([w for w in kws if w not in matched])
+
+        marks = min(max_marks, matched_c)
+        all_hit  = list(set(all_hit))
+        all_miss = list(set(all_miss) - set(all_hit))
+
+        highlighted = html_lib.escape(student_ans)
+        for w in sorted(all_hit, key=len, reverse=True):
+            highlighted = re.sub(r'\b'+re.escape(w)+r'\b',
+                                 f"<mark class='hit'>{w}</mark>", highlighted)
+
+        r = marks/max_marks if max_marks else 0
+        comment = ("Excellent answer." if r >= 1.0 else
+                   "Good attempt — some points missing." if r >= 0.5 else
+                   "Partially correct — expand your answer." if marks > 0 else
+                   "Insufficient — review the mark scheme.")
+
+        return {
+            "marks_awarded":      marks,
+            "max_marks":          max_marks,
+            "comment":            comment,
+            "matched_points":     all_hit[:6],
+            "missing_points":     all_miss[:6],
+            "highlighted_answer": highlighted
+        }
+
+    # ------------------------------------------------------------------ #
+    #  RUN                                                                 #
+    # ------------------------------------------------------------------ #
+    try:
+        result = ai_evaluate(student, correct, question)
+    except Exception as e:
+        print(f"[AI feedback error] {e} — falling back to heuristic")
+        result = heuristic_evaluate(student, correct)
+
+    marks_awarded = result.get("marks_awarded", 0)
+    max_marks     = result.get("max_marks", 4)
+
+    # Convert <mark class='hit'> tags to styled spans for the browser
+    highlighted = result.get("highlighted_answer", html_lib.escape(student))
+    highlighted = highlighted.replace(
+        "<mark class='hit'>",
+        "<span style='color:green;font-weight:bold;background:#d1fae5;padding:0 2px;border-radius:3px'>"
+    ).replace("</mark>", "</span>")
 
     return jsonify({
-        "marks":       f"{marks}/{max_marks}",
-        "matched":     all_matched_kws[:6],
-        "missing":     all_missing_kws[:6],
-        "comment":     comment,
+        "marks":       f"{marks_awarded}/{max_marks}",
+        "matched":     result.get("matched_points", [])[:6],
+        "missing":     result.get("missing_points", [])[:6],
+        "comment":     result.get("comment", ""),
         "highlighted": highlighted,
         "model":       correct
     })
