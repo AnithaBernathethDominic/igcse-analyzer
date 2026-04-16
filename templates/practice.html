@@ -624,17 +624,45 @@ async function checkAnswer() {
     return;
   }
 
-  const q       = questions[current];
-  const correct = q.answer || '';
+  const q             = questions[current];
+  const correct       = q.answer || '';
+  const question_text = q.question_text || '';
 
-  const res  = await fetch('/feedback', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ student, correct })
-  });
-  const data = await res.json();
+  // Show loading state
+  const checkBtn = document.querySelector('.btn-primary');
+  checkBtn.disabled    = true;
+  checkBtn.textContent = '⏳ Marking…';
+  showLoadingFeedback();
 
-  renderFeedback(data, student);
+  try {
+    const res  = await fetch('/feedback', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ student, correct, question_text })
+    });
+    const data = await res.json();
+    renderFeedback(data, student);
+  } catch(e) {
+    document.getElementById('feedbackCard').classList.remove('visible');
+    alert('Error contacting server. Please try again.');
+  } finally {
+    checkBtn.disabled    = false;
+    checkBtn.textContent = '✓ Check Answer';
+  }
+}
+
+function showLoadingFeedback() {
+  const card = document.getElementById('feedbackCard');
+  card.classList.add('visible');
+  document.getElementById('scoreCircle').textContent   = '…';
+  document.getElementById('scoreCircle').className     = 'score-circle';
+  document.getElementById('scoreComment').textContent  = 'AI examiner is marking your answer…';
+  document.getElementById('scoreSubtext').textContent  = 'This takes a few seconds';
+  document.getElementById('highlightedAnswer').innerHTML = '<span style="color:#aaa;font-style:italic">Analysing…</span>';
+  document.getElementById('missingPills').innerHTML    = '';
+  document.getElementById('matchedPills').innerHTML    = '';
+  document.getElementById('missingWrap').style.display = 'none';
+  document.getElementById('matchedWrap').style.display = 'none';
 }
 
 // ---- RENDER FEEDBACK ----
