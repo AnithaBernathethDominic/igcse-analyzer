@@ -3,3 +3,4 @@ pdfplumber
 supabase
 gunicorn
 PyMuPDF
+anthropic
