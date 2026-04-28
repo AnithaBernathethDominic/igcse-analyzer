@@ -22,11 +22,196 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ---------- LOAD TOPICS ----------
+# ---------- TOPIC CLASSIFIER (IGCSE CS 0478) ----------
+# Embedded directly — no topics.json file needed.
 
-with open("topics.json") as f:
-
-    TOPICS = json.load(f)
+TOPIC_RULES = [
+    {
+        "topic": "Data Representation",
+        "subtopic": "1.1 Number Systems",
+        "keywords": [
+            "binary", "denary", "hexadecimal", "hex", "convert", "conversion",
+            "overflow", "shift", "logical shift", "left shift", "right shift",
+            "two's complement", "twos complement", "8-bit", "12-bit", "register",
+            "add binary", "binary addition", "negative denary",
+        ],
+    },
+    {
+        "topic": "Data Representation",
+        "subtopic": "1.2 Text, Sound and Images",
+        "keywords": [
+            "sample rate", "sampling rate", "sample resolution", "sampling resolution",
+            "resolution", "colour depth", "color depth", "ascii", "unicode",
+            "character set", "pixel", "pixels", "image", "sound", "text",
+        ],
+    },
+    {
+        "topic": "Data Representation",
+        "subtopic": "1.3 Data Storage and Compression",
+        "keywords": [
+            "file size", "compression", "compress", "compressed", "rle",
+            "run length encoding", "lossy", "lossless", "bit", "byte", "nibble",
+            "kib", "mib", "gib", "tib", "storage units",
+        ],
+    },
+    {
+        "topic": "Data Transmission",
+        "subtopic": "2.1 Transmission Methods",
+        "keywords": [
+            "packet", "packets", "header", "payload", "trailer", "packet switching",
+            "transmission method", "serial", "parallel", "simplex",
+            "half-duplex", "full-duplex", "duplex", "usb",
+        ],
+    },
+    {
+        "topic": "Data Transmission",
+        "subtopic": "2.2 Error Detection",
+        "keywords": [
+            "parity", "parity check", "checksum", "echo check", "check digit",
+            "isbn", "barcode", "bar code", "arq", "automatic repeat request",
+            "error detection", "acknowledgement", "timeout",
+        ],
+    },
+    {
+        "topic": "Data Transmission",
+        "subtopic": "2.3 Encryption",
+        "keywords": [
+            "encryption", "encrypt", "encrypted", "symmetric", "asymmetric",
+            "public key", "private key", "plain text", "cipher text", "ssl",
+            "secure socket", "https", "certificate",
+        ],
+    },
+    {
+        "topic": "CPU and Hardware",
+        "subtopic": "3.1 Computer Architecture",
+        "keywords": [
+            "cpu", "alu", "cu", "control unit", "arithmetic logic unit",
+            "program counter", "mar", "mdr", "cir", "accumulator",
+            "fde", "fetch", "decode", "execute", "fetch-decode-execute",
+            "clock speed", "cache", "core", "cores", "von neumann",
+            "embedded system", "general purpose",
+        ],
+    },
+    {
+        "topic": "Input and Output Devices",
+        "subtopic": "3.2 Input and Output Devices",
+        "keywords": [
+            "input device", "output device", "keyboard", "scanner",
+            "barcode scanner", "qr code", "digital camera", "microphone",
+            "mouse", "touch screen", "printer", "speaker", "projector",
+            "monitor", "sensor", "temperature sensor", "pressure sensor",
+            "light sensor", "humidity sensor", "gas sensor", "proximity sensor",
+        ],
+    },
+    {
+        "topic": "Storage",
+        "subtopic": "3.3 Data Storage",
+        "keywords": [
+            "ram", "rom", "primary storage", "secondary storage", "magnetic",
+            "optical", "solid-state", "solid state", "ssd", "hdd",
+            "virtual memory", "cloud storage", "tracks", "sectors",
+            "pits", "lands", "nand", "nor", "volatile", "non-volatile",
+        ],
+    },
+    {
+        "topic": "Networking",
+        "subtopic": "3.4 Network Hardware and Protocols",
+        "keywords": [
+            "nic", "network interface card", "mac address", "ip address",
+            "ipv4", "ipv6", "router", "switch", "hub", "modem",
+            "lan", "wan", "wlan", "wifi", "ethernet", "topology",
+            "dns", "dhcp", "http", "ftp", "tcp", "network",
+            "url", "web page", "web browser", "world wide web", "www",
+        ],
+    },
+    {
+        "topic": "Software",
+        "subtopic": "4.1 System and Application Software",
+        "keywords": [
+            "system software", "application software", "operating system",
+            "os", "memory management", "file management",
+            "interrupt", "hardware interrupt", "software interrupt",
+            "interrupt service routine", "isr", "utility",
+        ],
+    },
+    {
+        "topic": "Programming Languages",
+        "subtopic": "4.2 Programming Languages and Translators",
+        "keywords": [
+            "high-level", "high level", "low-level", "low level",
+            "assembly language", "assembler", "compiler", "interpreter",
+            "translator", "ide", "integrated development environment",
+            "machine code", "mnemonic", "executable file",
+            "line by line", "whole code", "source code",
+        ],
+    },
+    {
+        "topic": "Cyber Security",
+        "subtopic": "5.3 Cyber Security",
+        "keywords": [
+            "malware", "phishing", "firewall", "anti-malware", "virus",
+            "hacking", "password", "authentication", "biometric",
+            "fingerprint", "social engineering", "spyware", "brute force",
+            "ransomware", "ddos", "trojan", "cybersecurity",
+        ],
+    },
+    {
+        "topic": "Embedded Systems",
+        "subtopic": "6. Automated and Emerging Technologies",
+        "keywords": [
+            "automated system", "automation", "robotics", "robot",
+            "artificial intelligence", "expert system", "machine learning",
+            "actuator", "inference engine", "knowledge base", "rule base",
+        ],
+    },
+    {
+        "topic": "Algorithm Design",
+        "subtopic": "7. Algorithm Design and Problem Solving",
+        "keywords": [
+            "algorithm", "decomposition", "flowchart", "pseudocode",
+            "validation", "verification", "test data", "normal data",
+            "abnormal data", "extreme data", "trace table", "dry run",
+            "logic error", "syntax error", "runtime error",
+        ],
+    },
+    {
+        "topic": "Programming",
+        "subtopic": "8. Programming Concepts",
+        "keywords": [
+            "variable", "constant", "sequence", "selection", "iteration",
+            "for loop", "while loop", "repeat until", "array",
+            "file handling", "read file", "write file", "procedure",
+            "function", "parameter", "subroutine", "declare",
+            "integer", "string", "boolean", "real", "output", "input",
+        ],
+    },
+    {
+        "topic": "Databases",
+        "subtopic": "9. Databases",
+        "keywords": [
+            "database", "table", "field", "record", "primary key",
+            "foreign key", "query", "sql", "data type", "form", "report",
+            "entity", "relationship",
+        ],
+    },
+    {
+        "topic": "Boolean Logic",
+        "subtopic": "10. Boolean Logic",
+        "keywords": [
+            "logic gate", "and gate", "or gate", "not gate", "nand gate",
+            "nor gate", "xor gate", "truth table", "logic circuit",
+            "logic expression", "boolean", "logic diagram",
+        ],
+    },
+    {
+        "topic": "Number Systems",
+        "subtopic": "1.1 Number Systems",
+        "keywords": [
+            "binary", "denary", "hexadecimal", "hex", "base 2", "base 10",
+            "base 16", "octal", "convert", "place value",
+        ],
+    },
+]
 
 # ---------- EXTRACT TEXT ----------
 
@@ -450,17 +635,92 @@ def parse_ms(raw_text):
 
 # ---------- MAP TOPIC ----------
 
-def map_topic(text):
+def _normalise(text: str) -> str:
+    text = text.lower()
+    text = text.replace("\u2019", "'").replace("\u2013", "-").replace("\u2014", "-")
+    return re.sub(r"\s+", " ", text).strip()
 
-    for topic, keywords in TOPICS.items():
+def map_topic(text: str) -> str:
+    """
+    Classify question text into an IGCSE CS 0478 topic using the
+    weighted rule-based scorer from the attached classifier.
 
-        for word in keywords:
+    Scoring:
+    - Multi-word keyword match  = +4 points  (more specific, more reliable)
+    - Single-word keyword match = +2 points
+    Extra boosts for strong exam patterns (binary strings, hex patterns, etc.)
 
-            if word.lower() in text.lower():
+    Returns the top-scoring topic name, or 'General' if nothing matches.
+    """
+    q = _normalise(text)
+    best_topic  = "General"
+    best_score  = 0
 
-                return topic
+    for rule in TOPIC_RULES:
+        score = 0
 
-    return "General"
+        for keyword in rule["keywords"]:
+            kw = _normalise(keyword)
+            if kw in q:
+                score += 4 if " " in kw else 2
+
+        # --- Exam-pattern boosts ---
+
+        # Binary number pattern (e.g. "01101001")
+        if re.search(r"\b[01]{4,16}\b", q):
+            if rule["subtopic"] == "1.1 Number Systems":
+                score += 3
+
+        # Hex number pattern when hex is mentioned
+        if re.search(r"\b[0-9a-f]{2,4}\b", q) and ("hex" in q or "hexadecimal" in q):
+            if rule["subtopic"] == "1.1 Number Systems":
+                score += 3
+
+        # Tick-box input/output/storage MCQ
+        if "tick" in q and any(w in q for w in ("input", "output", "storage")):
+            if rule["subtopic"] == "3.2 Input and Output Devices":
+                score += 3
+
+        # "Explain why ... embedded" pattern
+        if "explain" in q and "why" in q and "embedded" in q:
+            if rule["subtopic"] == "3.1 Computer Architecture":
+                score += 3
+
+        # Pseudocode / algorithm questions
+        if any(kw in q for kw in ("pseudocode", "algorithm", "flowchart", "trace table")):
+            if rule["topic"] == "Algorithm Design":
+                score += 3
+
+        # Programming questions with DECLARE / loop keywords
+        if any(kw in q for kw in ("declare", "for loop", "while loop", "procedure", "function", "array")):
+            if rule["topic"] == "Programming":
+                score += 3
+
+        # SSL / HTTPS / secure connection
+        if any(kw in q for kw in ("ssl", "https", "secure connection", "certificate")):
+            if rule["subtopic"] == "2.3 Encryption":
+                score += 4
+
+        # Writing/completing a procedure/function = Programming (not Algorithm Design)
+        if ("complete" in q or "write" in q) and any(kw in q for kw in ("procedure", "function", "program")):
+            if rule["topic"] == "Programming":
+                score += 4
+
+        # IDE question about features/functions = Programming Languages
+        if "ide" in q and any(kw in q for kw in ("function", "feature", "tool", "role", "found")):
+            if rule["subtopic"] == "4.2 Programming Languages and Translators":
+                score += 4
+
+        # Translator-type questions: compiler vs interpreter = Programming Languages
+        if any(kw in q for kw in ("compiler", "interpreter", "assembler", "translator", "machine code")):
+            if rule["topic"] == "Programming Languages":
+                score += 4
+
+        if score > best_score:
+            best_score = score
+            best_topic = rule["topic"]
+
+    return best_topic
 
 # ---------- MERGE ----------
 
