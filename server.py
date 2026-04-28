@@ -836,122 +836,149 @@ Mark this answer strictly and return only the JSON."""
 
     def heuristic_evaluate(student_ans, mark_scheme):
 
+        """
+        Improved deterministic marker.
+        Handles "Any two from" mark schemes, one-word list answers,
+        plurals, and small spelling mistakes such as acutator -> actuator.
+        """
+
+        import difflib
+
         STOPWORDS = {
-
             "the","and","that","this","with","from","have","which","will","when",
-
             "what","where","there","their","they","than","then","each","such",
-
             "into","uses","using","would","could","should","about","after",
-
             "before","other","also","more","some","been","were","being",
-
             "because","while","any","give","state","explain","describe",
-
-            "must","not","can","per","are","has","had","used","for","its"
-
+            "must","not","can","per","are","has","had","used","for","its",
+            "example","examples","cambridge","igcse","mark","scheme","published",
+            "may","june","november","october","paper","answer","marks"
         }
 
+        SYNONYMS = {
+            "microprocessor": ["microprocessors", "processor", "processors"],
+            "microprocessors": ["microprocessor", "processor", "processors"],
+            "actuator": ["actuators", "acutator", "actutor", "actuater"],
+            "actuators": ["actuator", "acutator", "actutor", "actuater"],
+            "sensor": ["sensors"],
+            "sensors": ["sensor"],
+        }
+
+        def norm(txt):
+            txt = (txt or "").lower()
+            txt = txt.replace("’", "'").replace("–", "-").replace("—", "-")
+            txt = re.sub(r"[^a-z0-9\s,/;:-]", " ", txt)
+            return re.sub(r"\s+", " ", txt).strip()
+
+        def singular(w):
+            if len(w) > 4 and w.endswith("ies"):
+                return w[:-3] + "y"
+            if len(w) > 3 and w.endswith("s"):
+                return w[:-1]
+            return w
+
+        def tokens(txt):
+            return [w for w in re.findall(r"[a-z0-9]+", norm(txt)) if len(w) > 2 and w not in STOPWORDS]
+
         def extract_max_marks(ans):
-
-            nums = {'one':1,'two':2,'three':3,'four':4,'five':5,'1':1,'2':2,'3':3,'4':4,'5':5}
-
-            m = re.match(r'(?i)any\s+(\w+)\s+from', ans.strip())
-
-            if m: return nums.get(m.group(1).lower(), 4)
-
-            m = re.match(r'(?i)(\w+)\s+from[:\s]', ans.strip())
-
-            if m: return nums.get(m.group(1).lower(), 4)
-
-            m = re.match(r'(?i)(\w+)\s+mark', ans.strip())
-
-            if m: return nums.get(m.group(1).lower(), 4)
-
+            txt = norm(ans)
+            nums = {'one':1,'two':2,'three':3,'four':4,'five':5,'six':6,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6}
+            m = re.search(r'\bany\s+(one|two|three|four|five|six|[1-6])\s+from\b', txt)
+            if m: return nums.get(m.group(1), 4)
+            m = re.search(r'\b(one|two|three|four|five|six|[1-6])\s+from\b', txt)
+            if m: return nums.get(m.group(1), 4)
+            m = re.search(r'\bgive\s+(one|two|three|four|five|six|[1-6])\b', norm(question))
+            if m: return nums.get(m.group(1), 4)
             return 4
 
-        def split_concepts(ans):
+        def clean_ms(ans):
+            txt = norm(ans)
+            txt = re.sub(r'\bcambridge igcse mark scheme\b.*$', ' ', txt)
+            txt = re.sub(r'\bpublished\b.*$', ' ', txt)
+            txt = re.sub(r'\bany\s+(one|two|three|four|five|six|[1-6])\s+from\b[:\s]*', ' ', txt)
+            txt = re.sub(r'\b(one|two|three|four|five|six|[1-6])\s+from\b[:\s]*', ' ', txt)
+            txt = re.sub(r'\bexamples?\b[:\s]*', ' ', txt)
+            return re.sub(r'\s+', ' ', txt).strip()
 
-            clean = re.sub(r'(?i)^(any|one|two|three|four|five)\s+(mark[s]?\s+)?(from|for\s+each)[:\s]*','',ans.strip())
+        def extract_points(ans):
+            txt = clean_ms(ans)
+            # Split common MS separators, but also handle compact lists: Sensors Microprocessors Actuators
+            parts = re.split(r'\s*//\s*|\s*;\s*|\s*\|\s*|,\s*', txt)
+            points = []
+            for part in parts:
+                ws = tokens(part)
+                if len(ws) == 1:
+                    points.append(ws[0])
+                elif 2 <= len(ws) <= 6:
+                    points.extend(ws)
+                elif ws:
+                    points.append(' '.join(ws))
+            if len(points) <= 1:
+                points = tokens(txt)
+            seen, final = set(), []
+            for point in points:
+                key = singular(point)
+                if key not in seen and key not in STOPWORDS:
+                    seen.add(key); final.append(point)
+            return final
 
-            parts = re.split(r'\s*//\s*|\s*;\s*', clean)
+        def term_matches(term, student_words):
+            base = singular(term)
+            candidates = {base, term}
+            for syn in SYNONYMS.get(base, []) + SYNONYMS.get(term, []):
+                candidates.add(syn); candidates.add(singular(syn))
+            if candidates & student_words:
+                return True
+            # spelling tolerance for technical words
+            for sw in student_words:
+                if len(base) >= 6 and difflib.SequenceMatcher(None, base, sw).ratio() >= 0.80:
+                    return True
+            return False
 
-            if len(parts) == 1:
+        student_words = {singular(w) for w in tokens(student_ans)} | set(tokens(student_ans))
+        max_marks = extract_max_marks(mark_scheme)
+        points = extract_points(mark_scheme)
 
-                parts = re.split(r'(?<=[a-z]{3})\.\s+(?=[A-Z])', parts[0])
-
-            return [p.strip() for p in parts if len(p.strip()) > 6]
-
-        student_l = student_ans.lower()
-
-        max_marks = extract_max_marks(mark_scheme.lower())
-
-        concepts  = split_concepts(mark_scheme.lower()) or [mark_scheme.lower()]
-
-        matched_c, all_hit, all_miss = 0, [], []
-
-        for concept in concepts:
-
-            kws = list(set([w for w in re.findall(r'[a-z]+', concept)
-
-                            if len(w) > 3 and w not in STOPWORDS]))
-
-            if not kws: continue
-
-            # Require minimum 2 keywords OR a long keyword match to avoid single-word abuse
-
-            matched = [w for w in kws if re.search(r'\b'+re.escape(w)+r'\b', student_l)]
-
-            ratio   = len(matched)/len(kws)
-
-            if ratio >= 0.35 and (len(matched) >= 2 or any(len(w) > 6 for w in matched)):
-
-                matched_c += 1
-
-                all_hit.extend(matched)
-
+        matched, missing = [], []
+        for point in points:
+            ws = tokens(point)
+            ok = False
+            if len(ws) == 1:
+                ok = term_matches(ws[0], student_words)
+            elif ws:
+                hits = [w for w in ws if term_matches(w, student_words)]
+                ok = len(hits) >= max(1, min(2, len(ws)))
+            if ok:
+                matched.append(point)
+                if len(matched) >= max_marks:
+                    break
             else:
+                missing.append(point)
 
-                all_miss.extend([w for w in kws if w not in matched])
-
-        marks = min(max_marks, matched_c)
-
-        all_hit  = list(set(all_hit))
-
-        all_miss = list(set(all_miss) - set(all_hit))
+        marks = min(max_marks, len(matched))
 
         highlighted = html_lib.escape(student_ans)
-
-        for w in sorted(all_hit, key=len, reverse=True):
-
-            highlighted = re.sub(r'\b'+re.escape(w)+r'\b',
-
-                                 f"<mark class='hit'>{w}</mark>", highlighted)
+        for point in sorted(matched, key=len, reverse=True):
+            for w in tokens(point):
+                highlighted = re.sub(r'\b' + re.escape(w) + r's?\b',
+                                     lambda m: f"<mark class='hit'>{m.group(0)}</mark>",
+                                     highlighted, flags=re.IGNORECASE)
+            if singular(point) == 'actuator':
+                highlighted = re.sub(r'\bacutator\b', "<mark class='hit'>acutator</mark>", highlighted, flags=re.IGNORECASE)
 
         r = marks/max_marks if max_marks else 0
-
         comment = ("Excellent answer." if r >= 1.0 else
-
                    "Good attempt — some points missing." if r >= 0.5 else
-
                    "Partially correct — expand your answer." if marks > 0 else
-
                    "Insufficient — review the mark scheme.")
 
         return {
-
-            "marks_awarded":      marks,
-
-            "max_marks":          max_marks,
-
-            "comment":            comment,
-
-            "matched_points":     all_hit[:6],
-
-            "missing_points":     all_miss[:6],
-
+            "marks_awarded": marks,
+            "max_marks": max_marks,
+            "comment": comment,
+            "matched_points": matched[:6],
+            "missing_points": missing[:6],
             "highlighted_answer": highlighted
-
         }
 
     # ------------------------------------------------------------------ #
@@ -960,15 +987,24 @@ Mark this answer strictly and return only the JSON."""
 
     # ------------------------------------------------------------------ #
 
+    heuristic_result = heuristic_evaluate(student, correct)
+
     try:
 
-        result = ai_evaluate(student, correct, question)
+        ai_result = ai_evaluate(student, correct, question)
+
+        # Safety net: if deterministic marking finds more valid points,
+        # use it. This fixes cases where AI misses exact/fuzzy list answers.
+        if heuristic_result.get("marks_awarded", 0) > ai_result.get("marks_awarded", 0):
+            result = heuristic_result
+        else:
+            result = ai_result
 
     except Exception as e:
 
         print(f"[AI feedback error] {e} — falling back to heuristic")
 
-        result = heuristic_evaluate(student, correct)
+        result = heuristic_result
 
     marks_awarded = result.get("marks_awarded", 0)
 
