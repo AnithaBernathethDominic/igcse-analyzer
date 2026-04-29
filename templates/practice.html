@@ -6,737 +6,594 @@
 <title>IGCSE CS Practice</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --ink:       #0f1117;
-    --paper:     #faf9f6;
-    --cream:     #f0ede6;
-    --accent:    #1a56db;
-    --accent2:   #0e9f6e;
-    --danger:    #e02424;
-    --warn:      #d97706;
-    --border:    #d4cfc6;
-    --muted:     #6b6760;
-    --card:      #ffffff;
-    --shadow:    0 2px 12px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.05);
-    --shadow-lg: 0 8px 32px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
-  }
+:root {
+  --ink:    #0f1117; --paper: #faf9f6; --cream: #f0ede6;
+  --accent: #1a56db; --accent2:#0e9f6e; --danger:#e02424;
+  --warn:   #d97706; --border:#d4cfc6;  --muted: #6b6760;
+  --card:   #ffffff;
+  --shadow: 0 2px 12px rgba(0,0,0,.07), 0 1px 3px rgba(0,0,0,.05);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);min-height:100vh}
 
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* HEADER */
+header{background:var(--ink);color:#fff;display:flex;align-items:center;
+  justify-content:space-between;padding:0 28px;height:54px;position:sticky;top:0;z-index:200}
+.logo{font-family:'DM Serif Display',serif;font-size:1.2rem}
+.logo span{color:#60a5fa}
+.badge{font-size:.68rem;font-weight:600;letter-spacing:.08em;background:#60a5fa22;
+  color:#93c5fd;border:1px solid #3b82f620;padding:2px 8px;border-radius:100px;text-transform:uppercase}
 
-  body {
-    font-family: 'DM Sans', sans-serif;
-    background: var(--paper);
-    color: var(--ink);
-    min-height: 100vh;
-  }
+/* SHELL */
+.shell{display:grid;grid-template-columns:270px 1fr;min-height:calc(100vh - 54px)}
 
-  /* ---- TOP BAR ---- */
-  header {
-    background: var(--ink);
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 32px;
-    height: 56px;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-  .logo {
-    font-family: 'DM Serif Display', serif;
-    font-size: 1.25rem;
-    letter-spacing: 0.01em;
-  }
-  .logo span { color: #60a5fa; }
-  .badge {
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    background: #60a5fa22;
-    color: #93c5fd;
-    border: 1px solid #3b82f620;
-    padding: 2px 8px;
-    border-radius: 100px;
-    text-transform: uppercase;
-  }
+/* SIDEBAR */
+aside{background:var(--cream);border-right:1px solid var(--border);
+  padding:20px 0;overflow-y:auto;position:sticky;top:54px;height:calc(100vh - 54px)}
+.sidebar-title{font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted);padding:0 18px 10px}
+.topic-item{display:flex;align-items:center;gap:9px;padding:9px 18px;cursor:pointer;
+  border-left:3px solid transparent;transition:all .15s;font-size:.88rem;color:var(--ink);user-select:none}
+.topic-item:hover{background:#e8e3dc;border-left-color:var(--border)}
+.topic-item.active{background:var(--card);border-left-color:var(--accent);
+  color:var(--accent);font-weight:600}
+.topic-dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0}
+.topic-item.active .topic-dot{background:var(--accent)}
+.topic-count{margin-left:auto;font-size:.7rem;font-weight:600;background:var(--border);
+  color:var(--muted);padding:1px 7px;border-radius:100px;min-width:22px;text-align:center}
+.topic-item.active .topic-count{background:#dbeafe;color:var(--accent)}
+.sidebar-loading{padding:10px 18px;font-size:.85rem;color:var(--muted);font-style:italic}
 
-  /* ---- LAYOUT ---- */
-  .shell {
-    display: grid;
-    grid-template-columns: 260px 1fr;
-    min-height: calc(100vh - 56px);
-  }
+/* MAIN */
+main{padding:28px 32px;display:flex;flex-direction:column;gap:18px;min-width:0}
 
-  /* ---- SIDEBAR ---- */
-  aside {
-    background: var(--cream);
-    border-right: 1px solid var(--border);
-    padding: 24px 0;
-    overflow-y: auto;
-  }
-  .sidebar-title {
-    font-size: 0.65rem;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--muted);
-    padding: 0 20px 12px;
-  }
-  .topic-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 20px;
-    cursor: pointer;
-    border-left: 3px solid transparent;
-    transition: all 0.15s;
-    font-size: 0.9rem;
-    color: var(--ink);
-    user-select: none;
-  }
-  .topic-item:hover { background: #e8e3dc; border-left-color: var(--border); }
-  .topic-item.active {
-    background: var(--card);
-    border-left-color: var(--accent);
-    color: var(--accent);
-    font-weight: 600;
-  }
-  .topic-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--border);
-    flex-shrink: 0;
-  }
-  .topic-item.active .topic-dot { background: var(--accent); }
-  .topic-count {
-    margin-left: auto;
-    font-size: 0.72rem;
-    font-weight: 500;
-    background: var(--border);
-    color: var(--muted);
-    padding: 1px 7px;
-    border-radius: 100px;
-  }
-  .topic-item.active .topic-count { background: #dbeafe; color: var(--accent); }
+/* TABS */
+.tab-bar{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:4px}
+.tab{padding:8px 20px;font-size:.85rem;font-weight:600;cursor:pointer;
+  border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);transition:all .15s}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab:hover:not(.active){color:var(--ink)}
 
-  /* ---- MAIN PANEL ---- */
-  main {
-    padding: 32px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    max-width: 760px;
-  }
+/* EMPTY STATE */
+.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:12px;color:var(--muted);padding:80px 0;text-align:center}
+.empty-icon{font-size:3rem;opacity:.4}
+.empty-state h3{font-family:'DM Serif Display',serif;font-size:1.4rem;opacity:.5}
 
-  /* ---- EMPTY STATE ---- */
-  .empty-state {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    color: var(--muted);
-    padding: 80px 0;
-  }
-  .empty-icon { font-size: 3rem; opacity: 0.4; }
-  .empty-state h3 { font-family: 'DM Serif Display', serif; font-size: 1.4rem; color: var(--ink); opacity: 0.5; }
-  .empty-state p { font-size: 0.9rem; }
+/* PROGRESS */
+.progress-wrap{display:flex;align-items:center;gap:12px}
+.progress-label{font-size:.78rem;font-weight:600;color:var(--muted);white-space:nowrap}
+.progress-bar{flex:1;height:5px;background:var(--border);border-radius:100px;overflow:hidden}
+.progress-fill{height:100%;background:var(--accent);border-radius:100px;transition:width .4s ease}
 
-  /* ---- PROGRESS BAR ---- */
-  .progress-wrap {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .progress-label {
-    font-size: 0.78rem;
-    font-weight: 500;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-  .progress-bar {
-    flex: 1;
-    height: 5px;
-    background: var(--border);
-    border-radius: 100px;
-    overflow: hidden;
-  }
-  .progress-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 100px;
-    transition: width 0.4s ease;
-  }
+/* QUESTION CARD */
+.q-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:22px 26px;box-shadow:var(--shadow);animation:fadeUp .22s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.q-meta{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.q-tag{font-family:'DM Mono',monospace;font-size:.7rem;font-weight:500;
+  background:#f0f4ff;color:var(--accent);border:1px solid #bfdbfe;padding:3px 9px;border-radius:6px}
+.q-topic-tag{font-size:.7rem;font-weight:500;background:var(--cream);color:var(--muted);
+  border:1px solid var(--border);padding:3px 9px;border-radius:6px;max-width:260px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.q-text{font-size:.97rem;line-height:1.65;white-space:pre-wrap}
 
-  /* ---- QUESTION CARD ---- */
-  .q-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 24px 28px;
-    box-shadow: var(--shadow);
-    animation: fadeUp 0.25s ease;
-  }
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .q-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 14px;
-  }
-  .q-tag {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    font-weight: 500;
-    background: #f0f4ff;
-    color: var(--accent);
-    border: 1px solid #bfdbfe;
-    padding: 3px 9px;
-    border-radius: 6px;
-  }
-  .q-topic-tag {
-    font-size: 0.72rem;
-    font-weight: 500;
-    background: var(--cream);
-    color: var(--muted);
-    border: 1px solid var(--border);
-    padding: 3px 9px;
-    border-radius: 6px;
-  }
-  .q-text {
-    font-size: 1rem;
-    line-height: 1.65;
-    color: var(--ink);
-  }
+/* ANSWER */
+textarea{width:100%;min-height:100px;padding:12px 14px;font-family:'DM Sans',sans-serif;
+  font-size:.93rem;line-height:1.6;background:var(--card);border:1.5px solid var(--border);
+  border-radius:10px;resize:vertical;color:var(--ink);transition:border-color .15s;outline:none}
+textarea:focus{border-color:var(--accent)}
+textarea::placeholder{color:#b5b0a8}
 
-  /* ---- ANSWER INPUT ---- */
-  textarea {
-    width: 100%;
-    min-height: 110px;
-    padding: 14px 16px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.95rem;
-    line-height: 1.6;
-    background: var(--card);
-    border: 1.5px solid var(--border);
-    border-radius: 10px;
-    resize: vertical;
-    color: var(--ink);
-    transition: border-color 0.15s;
-    outline: none;
-  }
-  textarea:focus { border-color: var(--accent); }
-  textarea::placeholder { color: #b5b0a8; }
+/* BUTTONS */
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 18px;
+  font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:600;
+  border:none;border-radius:8px;cursor:pointer;transition:all .15s;user-select:none}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#1e40af}
+.btn-ghost{background:var(--card);color:var(--ink);border:1.5px solid var(--border)}
+.btn-ghost:hover{background:var(--cream)}
+.btn-ghost:disabled{opacity:.4;cursor:not-allowed}
+.btn-nav{background:var(--cream);color:var(--ink);border:1.5px solid var(--border);padding:8px 14px}
+.btn-nav:hover:not(:disabled){background:#e0dbd3}
+.btn-nav:disabled{opacity:.35;cursor:not-allowed}
 
-  /* ---- BUTTONS ---- */
-  .btn-row {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 9px 20px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.875rem;
-    font-weight: 600;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.15s;
-    user-select: none;
-  }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #1e40af; }
-  .btn-ghost {
-    background: var(--card);
-    color: var(--ink);
-    border: 1.5px solid var(--border);
-  }
-  .btn-ghost:hover { background: var(--cream); }
-  .btn-success { background: var(--accent2); color: #fff; }
-  .btn-success:hover { background: #047857; }
-  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+/* MODEL ANSWER */
+.model-answer{font-size:.88rem;line-height:1.7;padding:12px 16px;
+  background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;display:none;white-space:pre-wrap}
+.model-answer.visible{display:block}
 
-  /* ---- FEEDBACK CARD ---- */
-  .feedback-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 20px 24px;
-    box-shadow: var(--shadow);
-    display: none;
-    flex-direction: column;
-    gap: 14px;
-    animation: fadeUp 0.2s ease;
-  }
-  .feedback-card.visible { display: flex; }
+/* FEEDBACK CARD */
+.feedback-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:18px 22px;box-shadow:var(--shadow);display:none;flex-direction:column;gap:12px;
+  animation:fadeUp .2s ease}
+.feedback-card.visible{display:flex}
+.score-row{display:flex;align-items:center;gap:14px}
+.score-circle{width:54px;height:54px;border-radius:50%;border:3px solid var(--border);
+  display:flex;align-items:center;justify-content:center;font-family:'DM Serif Display',serif;
+  font-size:1.2rem;flex-shrink:0;transition:border-color .3s}
+.score-circle.good{border-color:var(--accent2);color:var(--accent2)}
+.score-circle.mid{border-color:var(--warn);color:var(--warn)}
+.score-circle.low{border-color:var(--danger);color:var(--danger)}
+.score-text h4{font-size:.93rem;font-weight:600;margin-bottom:2px}
+.score-text p{font-size:.8rem;color:var(--muted)}
+.divider{height:1px;background:var(--border)}
+.fb-label{font-size:.62rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:5px}
+.highlighted-answer{font-size:.88rem;line-height:1.7;padding:9px 13px;
+  background:var(--cream);border-radius:8px}
+.fb-block{padding:11px 14px;border-radius:8px;background:#f8fafc;border:1px solid var(--border)}
+.fb-block.fb-good{background:#f0fdf4;border-color:#bbf7d0}
+.fb-block.fb-good .fb-label{color:#065f46}
+.fb-block.fb-improve{background:#fffbeb;border-color:#fde68a}
+.fb-block.fb-improve .fb-label{color:#92400e}
+.fb-text{font-size:.88rem;line-height:1.65;margin-top:4px}
+.pill-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.pill{font-size:.76rem;font-weight:500;padding:2px 9px;border-radius:100px}
+.pill-hit{background:#d1fae5;color:#065f46}
+.pill-miss{background:#fee2e2;color:var(--danger)}
 
-  .score-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
-  .score-circle {
-    width: 56px; height: 56px;
-    border-radius: 50%;
-    border: 3px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'DM Serif Display', serif;
-    font-size: 1.3rem;
-    flex-shrink: 0;
-    transition: border-color 0.3s;
-  }
-  .score-circle.good  { border-color: var(--accent2); color: var(--accent2); }
-  .score-circle.mid   { border-color: var(--warn);    color: var(--warn); }
-  .score-circle.low   { border-color: var(--danger);  color: var(--danger); }
+/* QUESTION GRID (All Questions view) */
+.grid-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.grid-title{font-family:'DM Serif Display',serif;font-size:1.1rem}
+.grid-sub{font-size:.8rem;color:var(--muted)}
+.q-grid{display:grid;gap:10px}
+.q-grid-card{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;cursor:pointer;transition:all .15s;box-shadow:var(--shadow)}
+.q-grid-card:hover{border-color:var(--accent);background:#f0f4ff}
+.qgc-meta{display:flex;align-items:center;gap:7px;margin-bottom:7px}
+.qgc-num{font-family:'DM Mono',monospace;font-size:.68rem;font-weight:600;
+  background:#f0f4ff;color:var(--accent);border:1px solid #bfdbfe;padding:2px 7px;border-radius:5px}
+.qgc-topic{font-size:.68rem;color:var(--muted);background:var(--cream);
+  border:1px solid var(--border);padding:2px 7px;border-radius:5px}
+.qgc-text{font-size:.85rem;line-height:1.5;color:var(--ink);display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.qgc-ans{font-size:.75rem;color:var(--muted);margin-top:5px;font-style:italic;
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 
-  .score-text h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: 2px; }
-  .score-text p  { font-size: 0.82rem; color: var(--muted); }
-
-  .divider { height: 1px; background: var(--border); }
-
-  .fb-section-label {
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-bottom: 6px;
-  }
-  .highlighted-answer {
-    font-size: 0.9rem;
-    line-height: 1.7;
-    color: var(--ink);
-    padding: 10px 14px;
-    background: var(--cream);
-    border-radius: 8px;
-  }
-  .highlighted-answer .hit  { color: #047857; font-weight: 600; background: #d1fae5; padding: 0 2px; border-radius: 3px; }
-  .highlighted-answer .miss { color: var(--danger); }
-
-  .pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
-  .pill {
-    font-size: 0.78rem;
-    font-weight: 500;
-    padding: 3px 10px;
-    border-radius: 100px;
-  }
-  .pill-miss { background: #fee2e2; color: var(--danger); }
-  .pill-hit  { background: #d1fae5; color: #065f46; }
-
-  .model-answer {
-    font-size: 0.88rem;
-    line-height: 1.7;
-    color: var(--ink);
-    padding: 12px 16px;
-    background: #f0fdf4;
-    border: 1px solid #bbf7d0;
-    border-radius: 8px;
-    display: none;
-  }
-  .model-answer.visible { display: block; }
-
-  /* ---- SKELETON / LOADING ---- */
-  .loading-topic {
-    padding: 10px 20px;
-    font-size: 0.85rem;
-    color: var(--muted);
-    font-style: italic;
-  }
-
-  /* ---- RESPONSIVE ---- */
-  @media (max-width: 680px) {
-    .shell { grid-template-columns: 1fr; }
-    aside { border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; }
-    main { padding: 20px 16px; }
-  }
+@media(max-width:680px){
+  .shell{grid-template-columns:1fr}
+  aside{position:static;height:auto;max-height:200px;border-right:none;border-bottom:1px solid var(--border)}
+  main{padding:16px 14px}
+}
 </style>
 </head>
 <body>
-
 <header>
   <div class="logo">IGCSE <span>CS</span> Practice</div>
   <div class="badge">0478 · Paper 1</div>
 </header>
 
 <div class="shell">
-
   <!-- SIDEBAR -->
   <aside id="sidebar">
     <div class="sidebar-title">Topics</div>
-    <div class="loading-topic">Loading topics…</div>
+    <div class="sidebar-loading">Loading topics…</div>
   </aside>
 
   <!-- MAIN -->
   <main id="main">
-
-    <!-- Empty state -->
     <div class="empty-state" id="emptyState">
       <div class="empty-icon">📚</div>
       <h3>Select a topic</h3>
-      <p>Pick a topic from the left to start practising</p>
+      <p>Choose a topic from the sidebar to start practising</p>
     </div>
 
-    <!-- Practice area (hidden until topic selected) -->
-    <div id="practiceArea" style="display:none; display:none; flex-direction:column; gap:20px;">
+    <!-- Practice area -->
+    <div id="practiceArea" style="display:none;flex-direction:column;gap:18px">
 
-      <!-- Progress -->
-      <div class="progress-wrap">
-        <span class="progress-label" id="progressLabel">0 / 0</span>
-        <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+      <!-- Tab bar -->
+      <div class="tab-bar">
+        <div class="tab active" id="tabPractice" onclick="switchTab('practice')">✏️ Practice</div>
+        <div class="tab"        id="tabAll"      onclick="switchTab('all')">📋 All Questions</div>
       </div>
 
-      <!-- Question -->
-      <div class="q-card" id="qCard">
-        <div class="q-meta">
-          <span class="q-tag" id="qTag">Q—</span>
-          <span class="q-topic-tag" id="qTopicTag">—</span>
+      <!-- ===== PRACTICE TAB ===== -->
+      <div id="panelPractice">
+        <!-- Progress -->
+        <div class="progress-wrap" style="margin-bottom:6px">
+          <span class="progress-label" id="progressLabel">0 / 0</span>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
         </div>
-        <div class="q-text" id="qText">—</div>
-      </div>
 
-      <!-- Answer box -->
-      <textarea id="studentAnswer" placeholder="Write your answer here…"></textarea>
+        <!-- Question card -->
+        <div class="q-card" id="qCard">
+          <div class="q-meta">
+            <span class="q-tag"      id="qTag">Q—</span>
+            <span class="q-topic-tag" id="qTopicTag">—</span>
+          </div>
+          <div class="q-text" id="qText">—</div>
+        </div>
 
-      <!-- Buttons -->
-      <div class="btn-row">
-        <button class="btn btn-primary" onclick="checkAnswer()">✓ Check Answer</button>
-        <button class="btn btn-ghost"   onclick="toggleModel()">👁 Show Answer</button>
-        <button class="btn btn-ghost"   onclick="nextQuestion()">→ Next</button>
-      </div>
+        <!-- Answer -->
+        <textarea id="studentAnswer" placeholder="Write your answer here…"></textarea>
 
-      <!-- Model answer (toggleable) -->
-      <div class="model-answer" id="modelAnswer"></div>
+        <!-- Buttons -->
+        <div class="btn-row">
+          <button class="btn btn-primary" id="checkBtn" onclick="checkAnswer(event)">✓ Check Answer</button>
+          <button class="btn btn-ghost"   onclick="toggleModel()">👁 Show Answer</button>
+          <div style="flex:1"></div>
+          <button class="btn btn-nav" id="prevBtn" onclick="prevQuestion()" disabled>← Prev</button>
+          <button class="btn btn-nav" id="nextBtn" onclick="nextQuestion()">Next →</button>
+        </div>
 
-      <!-- Feedback -->
-      <div class="feedback-card" id="feedbackCard">
+        <!-- Model answer -->
+        <div class="model-answer" id="modelAnswer"></div>
 
-        <div class="score-row">
-          <div class="score-circle" id="scoreCircle">—</div>
-          <div class="score-text">
-            <h4 id="scoreComment">—</h4>
-            <p id="scoreSubtext">—</p>
+        <!-- Feedback -->
+        <div class="feedback-card" id="feedbackCard">
+          <div class="score-row">
+            <div class="score-circle" id="scoreCircle">—</div>
+            <div class="score-text">
+              <h4 id="scoreSubtext">—</h4>
+            </div>
+          </div>
+          <div class="divider"></div>
+          <div>
+            <div class="fb-label">Your Answer</div>
+            <div class="highlighted-answer" id="highlightedAnswer"></div>
+          </div>
+          <div class="divider"></div>
+          <div class="fb-block" id="examinerCommentWrap">
+            <div class="fb-label">📋 Examiner Comment</div>
+            <div class="fb-text" id="examinerComment"></div>
+          </div>
+          <div class="fb-block fb-good" id="whatWasGoodWrap">
+            <div class="fb-label">✅ What Was Good</div>
+            <div class="fb-text" id="whatWasGood"></div>
+          </div>
+          <div class="fb-block fb-improve" id="howToImproveWrap">
+            <div class="fb-label">💡 How To Improve</div>
+            <div class="fb-text" id="howToImprove"></div>
+          </div>
+          <div id="matchedWrap">
+            <div class="fb-label">Keywords Matched</div>
+            <div class="pill-row" id="matchedPills"></div>
+          </div>
+          <div id="missingWrap">
+            <div class="fb-label">Keywords Missing</div>
+            <div class="pill-row" id="missingPills"></div>
           </div>
         </div>
+      </div><!-- /panelPractice -->
 
-        <div class="divider"></div>
-
-        <div>
-          <div class="fb-section-label">Your Answer</div>
-          <div class="highlighted-answer" id="highlightedAnswer"></div>
+      <!-- ===== ALL QUESTIONS TAB ===== -->
+      <div id="panelAll" style="display:none">
+        <div class="grid-header" style="margin-bottom:12px">
+          <div>
+            <div class="grid-title" id="gridTitle">All Questions</div>
+            <div class="grid-sub"   id="gridSub"></div>
+          </div>
         </div>
-
-        <div id="missingWrap">
-          <div class="fb-section-label">Keywords Missing</div>
-          <div class="pill-row" id="missingPills"></div>
-        </div>
-
-        <div id="matchedWrap">
-          <div class="fb-section-label">Keywords Matched</div>
-          <div class="pill-row" id="matchedPills"></div>
-        </div>
-
+        <div class="q-grid" id="qGrid"></div>
       </div>
-    </div><!-- /practiceArea -->
 
+    </div><!-- /practiceArea -->
   </main>
 </div>
 
 <script>
 // ---- STATE ----
-let questions   = [];
-let current     = 0;
-let modelShown  = false;
-let topicCounts = {};   // topic -> count
+let questions    = [];
+let current      = 0;
+let modelShown   = false;
+let activeTab    = 'practice';
+let activeTopic  = '';
 
-// ---- TOPIC COLOURS (cycle) ----
 const DOT_COLORS = [
   '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
-  '#ec4899','#06b6d4','#84cc16','#f97316','#6366f1'
+  '#ec4899','#06b6d4','#84cc16','#f97316','#6366f1',
+  '#14b8a6','#a855f7','#f43f5e','#0ea5e9','#22c55e'
 ];
 
 // ---- BOOT ----
 async function boot() {
   try {
-    // Load counts per topic
-    const countRes = await fetch('/topics/counts');
-    if (countRes.ok) {
-      topicCounts = await countRes.json();
+    const res  = await fetch('/topics/with-counts');
+    const data = await res.json();
+    renderSidebar(data);
+  } catch(e) {
+    // fallback: simple topics list
+    try {
+      const res  = await fetch('/topics');
+      const data = await res.json();
+      renderSidebar(data.map(t => ({topic:t, count:''})));
+    } catch(_) {
+      document.getElementById('sidebar').innerHTML =
+        '<div class="sidebar-title">Topics</div>' +
+        '<div class="sidebar-loading">Could not load topics.</div>';
     }
-  } catch(_) {}
-
-  const res  = await fetch('/topics');
-  const data = await res.json();
-  renderSidebar(data);
+  }
 }
 
-function renderSidebar(topics) {
+function renderSidebar(topicData) {
   const aside = document.getElementById('sidebar');
   aside.innerHTML = '<div class="sidebar-title">Topics</div>';
-
-  if (!topics.length) {
-    aside.innerHTML += '<div class="loading-topic">No topics found. Upload a paper first.</div>';
+  if (!topicData.length) {
+    aside.innerHTML += '<div class="sidebar-loading">No topics found. Upload a paper first.</div>';
     return;
   }
-
-  topics.sort().forEach((t, idx) => {
-    const item  = document.createElement('div');
-    item.className = 'topic-item';
-    item.dataset.topic = t;
+  topicData.forEach((item, idx) => {
+    const t = item.topic || item;
+    const c = item.count || '';
+    const el = document.createElement('div');
+    el.className   = 'topic-item';
+    el.dataset.topic = t;
 
     const dot = document.createElement('div');
-    dot.className = 'topic-dot';
+    dot.className  = 'topic-dot';
     dot.style.background = DOT_COLORS[idx % DOT_COLORS.length];
 
-    const name  = document.createElement('span');
+    const name = document.createElement('span');
     name.textContent = t;
 
-    const count = document.createElement('span');
-    count.className = 'topic-count';
-    count.textContent = topicCounts[t] ?? '';
-    count.id = `count-${t}`;
+    const badge = document.createElement('span');
+    badge.className   = 'topic-count';
+    badge.id          = `cnt-${idx}`;
+    badge.textContent = c;
 
-    item.appendChild(dot);
-    item.appendChild(name);
-    item.appendChild(count);
-    item.onclick = () => selectTopic(t, item);
-    aside.appendChild(item);
+    el.appendChild(dot);
+    el.appendChild(name);
+    el.appendChild(badge);
+    el.onclick = () => selectTopic(t, el, `cnt-${idx}`);
+    aside.appendChild(el);
   });
 }
 
 // ---- SELECT TOPIC ----
-async function selectTopic(topic, el) {
-  // Highlight sidebar
+async function selectTopic(topic, el, countId) {
   document.querySelectorAll('.topic-item').forEach(i => i.classList.remove('active'));
   el.classList.add('active');
+  activeTopic = topic;
 
-  // Load questions
-  const res = await fetch(`/practice/${encodeURIComponent(topic)}`);
-  questions = await res.json();
-  current   = 0;
+  const res  = await fetch(`/practice/${encodeURIComponent(topic)}`);
+  questions  = await res.json();
+  current    = 0;
   modelShown = false;
+
+  // Update count badge
+  const cEl = document.getElementById(countId);
+  if (cEl) cEl.textContent = questions.length;
 
   if (!questions.length) {
     showEmpty('No questions found for this topic.');
     return;
   }
 
-  // Update count badge
-  const countEl = document.getElementById(`count-${topic}`);
-  if (countEl) countEl.textContent = questions.length;
-
   showPracticeArea();
-  renderQuestion();
+  switchTab(activeTab === 'all' ? 'all' : 'practice');
 }
 
-// ---- SHOW / HIDE AREAS ----
 function showPracticeArea() {
   document.getElementById('emptyState').style.display    = 'none';
-  const pa = document.getElementById('practiceArea');
-  pa.style.display = 'flex';
+  document.getElementById('practiceArea').style.display  = 'flex';
 }
 function showEmpty(msg) {
-  const pa = document.getElementById('practiceArea');
-  pa.style.display = 'none';
-  const es = document.getElementById('emptyState');
-  es.style.display = 'flex';
-  es.querySelector('p').textContent = msg || 'Pick a topic from the left';
+  document.getElementById('practiceArea').style.display  = 'none';
+  document.getElementById('emptyState').style.display    = 'flex';
+  document.querySelector('#emptyState p').textContent    = msg || 'Pick a topic';
 }
 
-// ---- RENDER QUESTION ----
+// ---- TABS ----
+function switchTab(tab) {
+  activeTab = tab;
+  document.getElementById('tabPractice').classList.toggle('active', tab==='practice');
+  document.getElementById('tabAll').classList.toggle('active',      tab==='all');
+  document.getElementById('panelPractice').style.display = tab==='practice' ? 'flex' : 'none';
+  document.getElementById('panelPractice').style.flexDirection = 'column';
+  document.getElementById('panelPractice').style.gap = '18px';
+  document.getElementById('panelAll').style.display      = tab==='all'      ? 'block' : 'none';
+
+  if (tab === 'practice') {
+    renderQuestion();
+  } else {
+    renderGrid();
+  }
+}
+
+// ---- RENDER QUESTION (Practice tab) ----
 function renderQuestion() {
   if (!questions.length) return;
+  const q   = questions[current];
+  let   txt = (q.question_text || '').replace(/^\([a-h]\)\s*/,'').replace(/^\([ivx]+\)\s*/,'').trim();
 
-  const q = questions[current];
-
-  // Strip leading "(a)" / "(b)(i)" prefix from question_text if it duplicates the question_no
-  let txt = q.question_text || '';
-  txt = txt.replace(/^\([a-h]\)\s*/,'').replace(/^\([ivx]+\)\s*/,'').trim();
-
-  document.getElementById('qTag').textContent      = q.question_no || '—';
+  document.getElementById('qTag').textContent      = q.question_no || q.question || '—';
   document.getElementById('qTopicTag').textContent = q.topic       || '—';
   document.getElementById('qText').textContent     = txt;
 
-  // Progress
-  const pct = ((current) / questions.length) * 100;
-  document.getElementById('progressLabel').textContent = `${current + 1} / ${questions.length}`;
+  const pct = (current / questions.length) * 100;
+  document.getElementById('progressLabel').textContent = `${current+1} / ${questions.length}`;
   document.getElementById('progressFill').style.width  = pct + '%';
 
+  // Prev / Next button states
+  document.getElementById('prevBtn').disabled = current === 0;
+  document.getElementById('nextBtn').disabled = current === questions.length - 1;
+  document.getElementById('nextBtn').textContent = current === questions.length - 1 ? 'Done ✓' : 'Next →';
+
   // Reset UI
-  document.getElementById('studentAnswer').value   = '';
+  document.getElementById('studentAnswer').value = '';
   document.getElementById('feedbackCard').classList.remove('visible');
   document.getElementById('modelAnswer').classList.remove('visible');
   document.getElementById('modelAnswer').textContent = '';
   modelShown = false;
 }
 
-// ---- SHOW / HIDE MODEL ANSWER ----
+// ---- NAVIGATION ----
+function prevQuestion() {
+  if (current > 0) {
+    current--;
+    renderQuestion();
+  }
+}
+
+function nextQuestion() {
+  if (current < questions.length - 1) {
+    current++;
+    renderQuestion();
+  } else {
+    // Last question — show completion
+    document.getElementById('qText').textContent      = '🎉 You\'ve completed all questions in this topic!';
+    document.getElementById('qTag').textContent       = 'Done';
+    document.getElementById('studentAnswer').value    = '';
+    document.getElementById('feedbackCard').classList.remove('visible');
+    document.getElementById('progressFill').style.width = '100%';
+    document.getElementById('progressLabel').textContent = `${questions.length} / ${questions.length}`;
+    document.getElementById('nextBtn').disabled = true;
+  }
+}
+
+// ---- TOGGLE MODEL ANSWER ----
 function toggleModel() {
   const ma = document.getElementById('modelAnswer');
   if (modelShown) {
-    ma.classList.remove('visible');
-    modelShown = false;
+    ma.classList.remove('visible'); modelShown = false;
   } else {
-    const q = questions[current];
-    ma.textContent = q.answer || 'No model answer available.';
-    ma.classList.add('visible');
-    modelShown = true;
+    ma.textContent = questions[current]?.answer || 'No model answer available.';
+    ma.classList.add('visible');    modelShown = true;
   }
-}
-
-// ---- NEXT ----
-function nextQuestion() {
-  current++;
-  if (current < questions.length) {
-    renderQuestion();
-    // Update progress fill after render
-    const pct = (current / questions.length) * 100;
-    document.getElementById('progressFill').style.width = pct + '%';
-  } else {
-    showDone();
-  }
-}
-
-function showDone() {
-  document.getElementById('qText').textContent = '🎉 You\'ve completed all questions in this topic!';
-  document.getElementById('qTag').textContent  = 'Done';
-  document.getElementById('studentAnswer').value = '';
-  document.getElementById('feedbackCard').classList.remove('visible');
-  document.getElementById('progressFill').style.width = '100%';
-  document.getElementById('progressLabel').textContent = `${questions.length} / ${questions.length}`;
 }
 
 // ---- CHECK ANSWER ----
-async function checkAnswer() {
+async function checkAnswer(evt) {
   const student = document.getElementById('studentAnswer').value.trim();
-  if (!student) {
-    document.getElementById('studentAnswer').focus();
-    return;
-  }
+  if (!student) { document.getElementById('studentAnswer').focus(); return; }
 
   const q             = questions[current];
-  const correct       = q.answer || '';
+  const correct       = q.answer        || '';
   const question_text = q.question_text || '';
 
-  // Show loading state
-  const checkBtn = document.querySelector('.btn-primary');
-  checkBtn.disabled    = true;
-  checkBtn.textContent = '⏳ Marking…';
+  const btn = document.getElementById('checkBtn');
+  btn.disabled = true; btn.textContent = '⏳ Marking…';
   showLoadingFeedback();
 
   try {
     const res  = await fetch('/feedback', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ student, correct, question_text })
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({student, correct, question_text})
     });
     const data = await res.json();
     renderFeedback(data, student);
   } catch(e) {
     document.getElementById('feedbackCard').classList.remove('visible');
-    alert('Error contacting server. Please try again.');
+    alert('Server error — please try again.');
   } finally {
-    checkBtn.disabled    = false;
-    checkBtn.textContent = '✓ Check Answer';
+    btn.disabled = false; btn.textContent = '✓ Check Answer';
   }
 }
 
 function showLoadingFeedback() {
   const card = document.getElementById('feedbackCard');
   card.classList.add('visible');
-  document.getElementById('scoreCircle').textContent   = '…';
-  document.getElementById('scoreCircle').className     = 'score-circle';
-  document.getElementById('scoreComment').textContent  = 'AI examiner is marking your answer…';
-  document.getElementById('scoreSubtext').textContent  = 'This takes a few seconds';
-  document.getElementById('highlightedAnswer').innerHTML = '<span style="color:#aaa;font-style:italic">Analysing…</span>';
-  document.getElementById('missingPills').innerHTML    = '';
-  document.getElementById('matchedPills').innerHTML    = '';
-  document.getElementById('missingWrap').style.display = 'none';
-  document.getElementById('matchedWrap').style.display = 'none';
+  document.getElementById('scoreCircle').textContent    = '…';
+  document.getElementById('scoreCircle').className      = 'score-circle';
+  document.getElementById('scoreSubtext').textContent   = 'AI examiner is marking…';
+  document.getElementById('highlightedAnswer').innerHTML= '<span style="color:#aaa;font-style:italic">Analysing…</span>';
+  document.getElementById('examinerComment').textContent = '';
+  document.getElementById('whatWasGood').textContent     = '';
+  document.getElementById('howToImprove').textContent    = '';
+  ['examinerCommentWrap','whatWasGoodWrap','howToImproveWrap','missingWrap','matchedWrap']
+    .forEach(id => document.getElementById(id).style.display = 'none');
+  document.getElementById('missingPills').innerHTML = '';
+  document.getElementById('matchedPills').innerHTML = '';
 }
 
-// ---- RENDER FEEDBACK ----
 function renderFeedback(data, studentRaw) {
-  const card = document.getElementById('feedbackCard');
+  const parts  = (data.marks || '0/4').split('/');
+  const scored = parseInt(parts[0]) || 0;
+  const total  = parseInt(parts[1]) || 4;
+  const ratio  = total > 0 ? scored / total : 0;
 
-  // Parse marks  e.g. "3/4"
-  const parts   = (data.marks || '0/4').split('/');
-  const scored  = parseInt(parts[0]) || 0;
-  const total   = parseInt(parts[1]) || 4;
-  const ratio   = total > 0 ? scored / total : 0;
-
-  // Score circle
   const circle = document.getElementById('scoreCircle');
   circle.textContent = data.marks || '—';
-  circle.className   = 'score-circle';
-  if      (ratio >= 0.75) circle.classList.add('good');
-  else if (ratio >= 0.40) circle.classList.add('mid');
-  else                    circle.classList.add('low');
+  circle.className   = 'score-circle ' + (ratio>=1?'good':ratio>=.5?'mid':'low');
 
-  document.getElementById('scoreComment').textContent = data.comment || '';
   document.getElementById('scoreSubtext').textContent =
-    scored === total ? 'Full marks — excellent!' :
-    scored === 0     ? 'Keep revising — you can do it' :
-    `${total - scored} mark${total - scored !== 1 ? 's' : ''} left to earn`;
+    scored===total ? 'Full marks — excellent!' :
+    scored===0     ? 'No marks — keep revising' :
+    `${scored} of ${total} marks earned`;
 
-  // Highlighted answer — use server-provided highlighted HTML but sanitise
-  const hiDiv = document.getElementById('highlightedAnswer');
-  // Replace the server's <span style=...> with our CSS classes
-  let hiHtml = data.highlighted || escHtml(studentRaw);
-  hiHtml = hiHtml.replace(
-    /<span style=['"]color:green[^'"]*['"]>(.*?)<\/span>/gi,
-    '<span class="hit">$1</span>'
-  );
-  hiDiv.innerHTML = hiHtml;
+  document.getElementById('highlightedAnswer').innerHTML =
+    data.highlighted || esc(studentRaw);
 
-  // Missing pills
-  const missPills = document.getElementById('missingPills');
-  const missWrap  = document.getElementById('missingWrap');
-  missPills.innerHTML = '';
-  if (data.missing && data.missing.length) {
-    data.missing.forEach(w => {
-      const p = document.createElement('span');
-      p.className   = 'pill pill-miss';
-      p.textContent = w;
-      missPills.appendChild(p);
-    });
-    missWrap.style.display = 'block';
-  } else {
-    missWrap.style.display = 'none';
-  }
+  // Examiner sections
+  const ec = data.examiner_comment || data.comment || '';
+  const wg = data.what_was_good    || '';
+  const hi = data.how_to_improve   || '';
 
-  // Matched pills
-  const hitPills  = document.getElementById('matchedPills');
-  const hitWrap   = document.getElementById('matchedWrap');
-  hitPills.innerHTML = '';
-  if (data.matched && data.matched.length) {
-    data.matched.forEach(w => {
-      const p = document.createElement('span');
-      p.className   = 'pill pill-hit';
-      p.textContent = w;
-      hitPills.appendChild(p);
-    });
-    hitWrap.style.display = 'block';
-  } else {
-    hitWrap.style.display = 'none';
-  }
+  set('examinerComment', ec, 'examinerCommentWrap', true);
+  set('whatWasGood',     wg, 'whatWasGoodWrap',
+      !!wg && !wg.toLowerCase().includes('no creditworthy'));
+  set('howToImprove',    hi, 'howToImproveWrap', !!hi && ratio < 1);
 
-  card.classList.add('visible');
-  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  // Pills
+  renderPills('matchedPills','matchedWrap', data.matched||[], 'pill-hit');
+  renderPills('missingPills','missingWrap', data.missing||[], 'pill-miss');
+
+  document.getElementById('feedbackCard').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function set(textId, text, wrapId, show) {
+  document.getElementById(textId).textContent            = text;
+  document.getElementById(wrapId).style.display          = show ? 'block' : 'none';
+}
+function renderPills(pillsId, wrapId, words, cls) {
+  const cont = document.getElementById(pillsId);
+  cont.innerHTML = '';
+  words.slice(0,6).forEach(w => {
+    const p = document.createElement('span');
+    p.className = 'pill '+cls; p.textContent = w; cont.appendChild(p);
+  });
+  document.getElementById(wrapId).style.display = words.length ? 'block' : 'none';
+}
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+
+// ---- RENDER QUESTION GRID (All Questions tab) ----
+function renderGrid() {
+  const grid = document.getElementById('qGrid');
+  grid.innerHTML = '';
+  document.getElementById('gridTitle').textContent = activeTopic || 'All Questions';
+  document.getElementById('gridSub').textContent   = `${questions.length} question${questions.length!==1?'s':''}`;
+
+  questions.forEach((q, idx) => {
+    const card = document.createElement('div');
+    card.className = 'q-grid-card';
+
+    const meta = document.createElement('div');
+    meta.className = 'qgc-meta';
+
+    const num = document.createElement('span');
+    num.className   = 'qgc-num';
+    num.textContent = q.question_no || q.question || `Q${idx+1}`;
+
+    const topic = document.createElement('span');
+    topic.className   = 'qgc-topic';
+    topic.textContent = (q.topic||'').split(' - ')[1] || q.topic || '';
+
+    meta.appendChild(num);
+    meta.appendChild(topic);
+
+    const txt = document.createElement('div');
+    txt.className   = 'qgc-text';
+    txt.textContent = (q.question_text||'').replace(/^\[Question \d+ context[^\]]*\]\n?/,'')
+                        .replace(/^\([a-h]\)\s*/,'').trim();
+
+    const ans = document.createElement('div');
+    ans.className   = 'qgc-ans';
+    ans.textContent = q.answer ? `Answer: ${q.answer.slice(0,100)}…` : 'No answer stored';
+
+    card.appendChild(meta);
+    card.appendChild(txt);
+    card.appendChild(ans);
+
+    // Click → jump to this question in Practice tab
+    card.onclick = () => {
+      current = idx;
+      switchTab('practice');
+    };
+
+    grid.appendChild(card);
+  });
 }
 
 boot();
