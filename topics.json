@@ -1,16 +1,115 @@
 {
-  "Number Systems": ["binary", "hexadecimal", "denary", "overflow", "shift"],
-  "CPU": ["processor", "core", "alu", "cu", "fde"],
-  "Input Devices": ["input", "keyboard", "mouse", "scanner"],
-  "Sensors": ["sensor", "light", "temperature"],
-  "Storage": ["optical", "disk", "ssd", "storage"],
-  "Programming": ["assembly", "language", "mnemonic"],
-  "Translators": ["assembler", "compiler", "interpreter"],
-  "Interrupts": ["interrupt"],
-  "Data Transmission": ["usb", "serial", "parallel"],
-  "Internet": ["url", "http", "browser", "dns", "cookies"],
-  "Cyber Security": ["proxy", "ddos"],
-  "AI": ["machine learning"],
-  "Embedded Systems": ["embedded"],
-  "Cloud Storage": ["cloud"]
+  "1. Data Representation - 1.1 Number Systems": [
+    "binary", "denary", "hexadecimal", "hex", "convert", "conversion",
+    "overflow", "shift", "logical shift", "left shift", "right shift",
+    "two's complement", "twos complement", "8-bit", "12-bit",
+    "add binary", "binary addition", "negative denary",
+    "largest denary", "largest hexadecimal"
+  ],
+  "1. Data Representation - 1.2 Text, Sound and Images": [
+    "sample rate", "sampling rate", "sample resolution", "sampling resolution",
+    "resolution", "colour depth", "color depth", "ascii", "unicode",
+    "character set", "pixel", "pixels", "image", "sound"
+  ],
+  "1. Data Representation - 1.3 Data Storage and Compression": [
+    "file size", "compression", "compress", "compressed", "rle",
+    "run length encoding", "lossy", "lossless", "nibble",
+    "kib", "mib", "gib", "tib", "storage units"
+  ],
+  "2. Data Transmission - 2.1 Transmission Methods": [
+    "packet", "packets", "header", "payload", "trailer", "packet switching",
+    "transmission method", "serial", "parallel", "simplex",
+    "half-duplex", "full-duplex", "duplex", "usb"
+  ],
+  "2. Data Transmission - 2.2 Error Detection": [
+    "parity", "parity check", "checksum", "echo check", "check digit",
+    "isbn", "barcode", "bar code", "arq", "automatic repeat request",
+    "error detection", "acknowledgement", "timeout"
+  ],
+  "2. Data Transmission - 2.3 Encryption": [
+    "encryption", "encrypt", "encrypted", "symmetric", "asymmetric",
+    "public key", "private key", "plain text", "cipher text",
+    "ssl", "secure socket", "https", "certificate"
+  ],
+  "3. Hardware - 3.1 Computer Architecture": [
+    "cpu", "microprocessor", "alu", "cu", "control unit",
+    "arithmetic logic unit", "program counter", "mar", "mdr", "cir",
+    "accumulator", "fde", "fetch", "decode", "execute",
+    "fetch-decode-execute", "clock speed", "cache", "cores",
+    "embedded system", "von neumann", "general purpose"
+  ],
+  "3. Hardware - 3.2 Input and Output Devices": [
+    "input device", "output device", "keyboard", "scanner",
+    "barcode scanner", "qr code scanner", "digital camera",
+    "microphone", "mouse", "touch screen", "printer", "speaker",
+    "projector", "screen", "temperature sensor", "pressure sensor",
+    "light sensor", "humidity sensor", "gas sensor", "proximity sensor"
+  ],
+  "3. Hardware - 3.3 Data Storage": [
+    "ram", "rom", "primary storage", "secondary storage", "magnetic",
+    "optical", "solid-state", "solid state", "ssd", "hdd",
+    "virtual memory", "cloud storage", "tracks", "sectors",
+    "pits", "lands", "floating gate", "control gate",
+    "volatile", "non-volatile"
+  ],
+  "3. Hardware - 3.4 Network Hardware": [
+    "nic", "network interface card", "mac address",
+    "ip address", "ipv4", "ipv6", "router", "switch", "hub", "modem"
+  ],
+  "4. Software - 4.1 System and Application Software": [
+    "system software", "application software", "operating system",
+    "memory management", "file management",
+    "interrupt", "hardware interrupt", "software interrupt",
+    "interrupt service routine", "isr", "utility software", "queue"
+  ],
+  "4. Software - 4.2 Programming Languages and Translators": [
+    "high-level", "high level", "low-level", "low level",
+    "assembly language", "assembler", "compiler", "interpreter",
+    "translator", "ide", "integrated development environment",
+    "machine code", "mnemonic", "executable file",
+    "line by line", "whole code", "source code"
+  ],
+  "5. Internet and Its Uses - 5.1 Internet Basics": [
+    "internet", "world wide web", "www", "url", "http",
+    "web browser", "browser", "website", "web page", "dns",
+    "domain name", "ip address", "webpage"
+  ],
+  "5. Internet and Its Uses - 5.2 Digital Currency": [
+    "digital currency", "cryptocurrency", "blockchain", "bitcoin",
+    "electronic money", "e-wallet", "wallet"
+  ],
+  "5. Internet and Its Uses - 5.3 Cyber Security": [
+    "malware", "phishing", "firewall", "anti-malware", "virus",
+    "hacking", "password", "authentication", "biometric",
+    "fingerprint", "social engineering", "spyware", "brute force",
+    "ransomware", "ddos", "trojan"
+  ],
+  "6. Automated and Emerging Technologies": [
+    "automated system", "automation", "robotics", "robot",
+    "artificial intelligence", "expert system", "machine learning",
+    "actuator", "inference engine", "knowledge base", "rule base"
+  ],
+  "7. Algorithm Design": [
+    "algorithm", "decomposition", "flowchart", "pseudocode",
+    "validation", "verification", "test data", "normal data",
+    "abnormal data", "extreme data", "trace table", "dry run",
+    "logic error", "syntax error", "runtime error"
+  ],
+  "8. Programming": [
+    "variable", "constant", "sequence", "selection", "iteration",
+    "for loop", "while loop", "repeat until", "array",
+    "file handling", "read file", "write file", "procedure",
+    "function", "parameter", "subroutine", "declare",
+    "integer", "string", "boolean", "real"
+  ],
+  "9. Databases": [
+    "database", "table", "field", "record", "primary key",
+    "foreign key", "query", "sql", "data type", "form", "report",
+    "entity", "relationship"
+  ],
+  "10. Boolean Logic": [
+    "logic gate", "and gate", "or gate", "not gate", "nand gate",
+    "nor gate", "xor gate", "truth table", "logic circuit",
+    "logic expression", "boolean", "logic diagram"
+  ]
 }
