@@ -712,6 +712,7 @@ Apply marking rules strictly. Return only JSON."""
         "what_was_good":    result.get("what_was_good", ""),
         "highlighted":      hi,
         "model":            correct,
+        "feedback_version":  "2026-06-28-objective-v2",
     })
 
 if __name__ == "__main__":
