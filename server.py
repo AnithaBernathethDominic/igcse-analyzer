@@ -366,27 +366,47 @@ def strip_ms_noise(text):
     text = re.sub(r'Page \d+ of \d+\s*', ' ', text)
     text = re.sub(r'Question\s+Answer\s+Marks', ' ', text)
     text = re.sub(r'\bAnswer\b\s+\bMarks\b', ' ', text)
-    text = re.sub(r'(?m)^\s*\d{1,2}\s*$', ' ', text)
     text = re.sub(r'\(cid:\d+\)', ' ', text)
     text = re.sub(r'\f', ' ', text)
     text = re.sub(r'[^\x00-\x7F]+', ' ', text)
     return text
 
 # ---------- PARSE MARK SCHEME ----------
+def _clean_ms_answer(raw):
+    raw = re.sub(r'\s+', ' ', raw).strip()
+    raw = re.sub(r'\s+\d{1,2}$', '', raw).strip()
+    raw = re.sub(r'^[\s;:,/\\|]+', '', raw).strip()
+    raw = re.sub(r'[\s;:,/\\|]+$', '', raw).strip()
+    return raw
+
 def parse_ms(raw_text):
-    text  = strip_ms_noise(raw_text)
-    q_pat = re.compile(r'(?<!\w)(\d+\([a-z]\)(?:\([ivx]+\))?)(?!\w)')
-    matches = list(q_pat.finditer(text))
+    text = strip_ms_noise(raw_text)
+    label_pat = re.compile(
+        r'(?m)^\s*(\d{1,2}(?:\([a-z]\)(?:\([ivx]+\))?)?)\s*$'
+    )
+    matches = []
+    for m in label_pat.finditer(text):
+        label = m.group(1).strip()
+        next_start = m.end()
+        next_match = label_pat.search(text, next_start)
+        next_end = next_match.start() if next_match else len(text)
+        preview = _clean_ms_answer(text[next_start:next_end])
+
+        # Mark and page numbers can appear as standalone digit lines in PDF text.
+        # Keep standalone main-question labels only when they introduce real text.
+        if "(" not in label and len(preview) < 20:
+            continue
+        matches.append(m)
+
     print(f"[DEBUG] parse_ms: {len(matches)} labels: {[m.group(1) for m in matches]}")
     answers = []
     for i, m in enumerate(matches):
         q_label   = m.group(1).strip()
         ans_start = m.end()
         ans_end   = matches[i+1].start() if i+1 < len(matches) else len(text)
-        raw       = re.sub(r'\s+', ' ', text[ans_start:ans_end]).strip()
-        raw       = re.sub(r'\s+\d{1,2}$', '', raw).strip()
-        raw       = re.sub(r'^[\s;:,/\\|]+', '', raw).strip()
-        raw       = re.sub(r'[\s;:,/\\|]+$', '', raw).strip()
+        raw       = _clean_ms_answer(text[ans_start:ans_end])
+        if not raw:
+            continue
         answers.append({"question": q_label, "answer": raw})
     unique = {}
     for a in answers:
