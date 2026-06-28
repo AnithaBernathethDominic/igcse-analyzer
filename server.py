@@ -562,7 +562,75 @@ Apply marking rules strictly. Return only JSON."""
         raw = re.sub(r'\s*```$', '', raw)
         return json.loads(raw)
 
-    def heuristic_evaluate(student_ans, mark_scheme):
+    def _score_exact_objective(student_ans, mark_scheme, q_text):
+        q_lower = q_text.lower()
+        s_compact = re.sub(r'[\s,;:_-]+', '', student_ans).upper()
+        s_binary = s_compact.replace("O", "0")
+
+        def strip_leading_zeroes(value):
+            value = value.lstrip("0")
+            return value or "0"
+
+        def binary_candidates(text):
+            cleaned = text.upper().replace("O", "0")
+            cleaned = re.sub(r'\(([01]{1,8})\)\s*([01]{2,32})',
+                             lambda m: m.group(1) + m.group(2), cleaned)
+            tokens = re.findall(r'(?<![A-Z0-9])[01]{2,32}(?![A-Z0-9])', cleaned)
+            out = set()
+            for token in tokens:
+                out.add(token)
+                out.add(strip_leading_zeroes(token))
+            return out
+
+        def number_candidates(text):
+            return set(re.findall(r'(?<![A-Z0-9])\d+(?![A-Z0-9])', text.upper()))
+
+        is_binary_q = any(term in q_lower for term in ("binary", "base 2", "base two"))
+        is_hex_q = any(term in q_lower for term in ("hex", "hexadecimal", "base 16"))
+        is_denary_q = any(term in q_lower for term in ("denary", "decimal", "base 10"))
+
+        if is_binary_q:
+            expected = binary_candidates(mark_scheme)
+            student_value = strip_leading_zeroes(s_binary)
+            if expected and student_value in expected:
+                return {
+                    "marks_awarded": 1, "max_marks": 1,
+                    "examiner_comment": "Correct. The denary value has been converted to the correct binary number.",
+                    "how_to_improve": "For binary conversion questions, leading zeroes are usually optional unless the question asks for a fixed number of bits.",
+                    "what_was_good": "You gave the correct binary value.",
+                    "matched_points": [student_ans],
+                    "missing_points": [],
+                    "highlighted_answer": f"<mark class='hit'>{html_lib.escape(student_ans)}</mark>"
+                }
+            if expected:
+                model = sorted(expected, key=len)[0]
+                return {
+                    "marks_awarded": 0, "max_marks": 1,
+                    "examiner_comment": "The answer does not match the required binary value.",
+                    "how_to_improve": f"Convert the denary number using place values 16, 8, 4, 2, 1. The expected binary value is {model}.",
+                    "what_was_good": "You attempted the answer in binary form." if re.fullmatch(r'[01O\s]+', student_ans.upper()) else "No creditworthy value was given.",
+                    "matched_points": [],
+                    "missing_points": [model],
+                    "highlighted_answer": html_lib.escape(student_ans)
+                }
+
+        if is_denary_q or is_hex_q:
+            expected = number_candidates(mark_scheme)
+            if expected and s_compact in expected:
+                label = "hexadecimal" if is_hex_q else "denary"
+                return {
+                    "marks_awarded": 1, "max_marks": 1,
+                    "examiner_comment": f"Correct. You gave the required {label} value.",
+                    "how_to_improve": "Keep setting out conversions clearly so small place-value mistakes are easier to spot.",
+                    "what_was_good": "Your final value matches the mark scheme.",
+                    "matched_points": [student_ans],
+                    "missing_points": [],
+                    "highlighted_answer": f"<mark class='hit'>{html_lib.escape(student_ans)}</mark>"
+                }
+
+        return None
+
+    def heuristic_evaluate(student_ans, mark_scheme, q_text):
         STOPWORDS = {
             "the","and","that","this","with","from","have","which","will","when",
             "what","where","there","their","they","than","then","each","such",
@@ -574,10 +642,14 @@ Apply marking rules strictly. Return only JSON."""
         def extract_max(ans):
             nums = {'one':1,'two':2,'three':3,'four':4,'five':5,
                     '1':1,'2':2,'3':3,'4':4,'5':5}
+            if re.search(r'(?i)\bone\s+mark\b', ans):
+                return 1
             m = re.match(r'(?i)any\s+(\w+)\s+from', ans)
             if m: return nums.get(m.group(1).lower(), 4)
             m = re.match(r'(?i)(\w+)\s+from[:\s]', ans)
             if m: return nums.get(m.group(1).lower(), 4)
+            if re.match(r'(?i)\s*(give|state|identify|write)\b', q_text.strip()):
+                return 1
             return 4
         def split_concepts(ans):
             clean = re.sub(r'(?i)^(any|one|two|three|four|five)\s+(mark[s]?\s+)?(from|for\s+each)[:\s]*','',ans)
@@ -615,10 +687,12 @@ Apply marking rules strictly. Return only JSON."""
         }
 
     try:
-        result = ai_evaluate(student, correct, question)
+        result = _score_exact_objective(student, correct, question)
+        if result is None:
+            result = ai_evaluate(student, correct, question)
     except Exception as e:
         print(f"[AI feedback error] {e} — fallback")
-        result = heuristic_evaluate(student, correct)
+        result = heuristic_evaluate(student, correct, question)
 
     ma  = result.get("marks_awarded", 0)
     mm  = result.get("max_marks", 4)
