@@ -84,6 +84,19 @@ textarea{width:100%;min-height:100px;padding:12px 14px;font-family:'DM Sans',san
   border-radius:10px;resize:vertical;color:var(--ink);transition:border-color .15s;outline:none}
 textarea:focus{border-color:var(--accent)}
 textarea::placeholder{color:#b5b0a8}
+.answer-area{display:flex;flex-direction:column;gap:10px}
+.mcq-options{display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.mcq-options.visible{display:grid}
+.mcq-option{display:flex;align-items:flex-start;gap:10px;text-align:left;background:var(--card);
+  border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;cursor:pointer;
+  font-family:'DM Sans',sans-serif;font-size:.92rem;line-height:1.45;color:var(--ink)}
+.mcq-option:hover{border-color:var(--accent);background:#f8fbff}
+.mcq-option.selected{border-color:var(--accent);background:#eef4ff;box-shadow:0 0 0 2px #bfdbfe}
+.mcq-letter{font-family:'DM Mono',monospace;font-weight:700;color:var(--accent);min-width:22px}
+.visual-note{display:none;font-size:.78rem;line-height:1.55;color:var(--muted);
+  background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-top:12px}
+.visual-note.visible{display:block}
+.q-text strong{font-weight:700}
 
 /* BUTTONS */
 .btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -204,10 +217,14 @@ textarea::placeholder{color:#b5b0a8}
             <span class="q-topic-tag" id="qTopicTag">—</span>
           </div>
           <div class="q-text" id="qText">—</div>
+          <div class="visual-note" id="visualNote"></div>
         </div>
 
         <!-- Answer -->
-        <textarea id="studentAnswer" placeholder="Write your answer here…"></textarea>
+        <div class="answer-area">
+          <div class="mcq-options" id="mcqOptions"></div>
+          <textarea id="studentAnswer" placeholder="Write your answer here…"></textarea>
+        </div>
 
         <!-- Buttons -->
         <div class="btn-row">
@@ -280,12 +297,66 @@ let current      = 0;
 let modelShown   = false;
 let activeTab    = 'practice';
 let activeTopic  = '';
+let selectedMcq  = '';
 
 const DOT_COLORS = [
   '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
   '#ec4899','#06b6d4','#84cc16','#f97316','#6366f1',
   '#14b8a6','#a855f7','#f43f5e','#0ea5e9','#22c55e'
 ];
+
+function escapeHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function stripQuestionPrefix(text) {
+  return String(text || '').replace(/^\([a-h]\)\s*/,'').replace(/^\([ivx]+\)\s*/,'').trim();
+}
+
+function detectMcq(text) {
+  const source = stripQuestionPrefix(text).replace(/\s+/g, ' ').trim();
+  const optionRegex = /(?:^|\s)([A-D])\s+(.+?)(?=\s+[A-D]\s+|$)/g;
+  const options = [];
+  let match;
+  while ((match = optionRegex.exec(source)) !== null) {
+    const value = match[2].trim();
+    if (value && value.length <= 80) options.push({letter: match[1], text: value});
+  }
+  const hasPrompt = /\b(tick|circle|choose|select)\b/i.test(source);
+  const hasEnoughOptions = options.length >= 2;
+  if (!hasPrompt || !hasEnoughOptions) return null;
+
+  const firstMarker = source.search(/(?:^|\s)A\s+/);
+  const prompt = firstMarker >= 0 ? source.slice(0, firstMarker).trim() : source;
+  return {prompt, options};
+}
+
+function formatQuestionHtml(text, mcq) {
+  let source = stripQuestionPrefix(text);
+  if (mcq) source = mcq.prompt;
+  source = source
+    .replace(/\b(Term)\s+(Description|Definition)\b/gi, '\n\n$1 | $2\n')
+    .replace(/\b(character set|sample rate|pixel|resolution|colour depth|color depth|bit depth|metadata|header)\b/gi, '\n$1')
+    .replace(/\b(This is|It is|This stores|The number)\b/g, '\n$1')
+    .replace(/\s*\/\/\s*/g, '\nOR ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return escapeHtml(source);
+}
+
+function formatAnswerText(answer) {
+  return String(answer || 'No model answer available.')
+    .replace(/\b(Term)\s+(Description|Definition)\b/gi, '$1 | $2\n')
+    .replace(/\b(character set|sample rate|pixel|resolution|colour depth|color depth|bit depth|metadata|header)\b/gi, '\n$1')
+    .replace(/\b(This is|It is|This stores|The number)\b/g, '\n$1')
+    .replace(/\s*\/\/\s*/g, '\nOR ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function shouldShowVisualNote(text) {
+  return /\b(image|diagram|figure|picture|table|boxes?|tick)\b/i.test(text || '');
+}
 
 // ---- BOOT ----
 async function boot() {
@@ -396,11 +467,50 @@ function switchTab(tab) {
 function renderQuestion() {
   if (!questions.length) return;
   const q   = questions[current];
-  let   txt = (q.question_text || '').replace(/^\([a-h]\)\s*/,'').replace(/^\([ivx]+\)\s*/,'').trim();
+  const rawText = q.question_text || '';
+  const mcq = detectMcq(rawText);
 
   document.getElementById('qTag').textContent      = q.question_no || q.question || '—';
   document.getElementById('qTopicTag').textContent = q.topic       || '—';
-  document.getElementById('qText').textContent     = txt;
+  document.getElementById('qText').innerHTML       = formatQuestionHtml(rawText, mcq);
+
+  const visualNote = document.getElementById('visualNote');
+  if (shouldShowVisualNote(rawText)) {
+    visualNote.textContent = mcq
+      ? 'Multiple-choice question: choose one option below.'
+      : 'This question was extracted from a PDF, so any original diagram/table image may appear as formatted text here.';
+    visualNote.classList.add('visible');
+  } else {
+    visualNote.classList.remove('visible');
+    visualNote.textContent = '';
+  }
+
+  selectedMcq = '';
+  const mcqOptions = document.getElementById('mcqOptions');
+  const answerBox = document.getElementById('studentAnswer');
+  mcqOptions.innerHTML = '';
+  if (mcq) {
+    mcq.options.forEach(opt => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mcq-option';
+      btn.innerHTML = `<span class="mcq-letter">${escapeHtml(opt.letter)}</span><span>${escapeHtml(opt.text)}</span>`;
+      btn.onclick = () => {
+        selectedMcq = opt.letter;
+        answerBox.value = opt.letter;
+        document.querySelectorAll('.mcq-option').forEach(item => item.classList.remove('selected'));
+        btn.classList.add('selected');
+      };
+      mcqOptions.appendChild(btn);
+    });
+    mcqOptions.classList.add('visible');
+    answerBox.style.display = 'none';
+    answerBox.value = '';
+  } else {
+    mcqOptions.classList.remove('visible');
+    answerBox.style.display = 'block';
+    answerBox.value = '';
+  }
 
   const pct = (current / questions.length) * 100;
   document.getElementById('progressLabel').textContent = `${current+1} / ${questions.length}`;
@@ -412,7 +522,6 @@ function renderQuestion() {
   document.getElementById('nextBtn').textContent = current === questions.length - 1 ? 'Done ✓' : 'Next →';
 
   // Reset UI
-  document.getElementById('studentAnswer').value = '';
   document.getElementById('feedbackCard').classList.remove('visible');
   document.getElementById('modelAnswer').classList.remove('visible');
   document.getElementById('modelAnswer').textContent = '';
@@ -436,6 +545,9 @@ function nextQuestion() {
     document.getElementById('qText').textContent      = '🎉 You\'ve completed all questions in this topic!';
     document.getElementById('qTag').textContent       = 'Done';
     document.getElementById('studentAnswer').value    = '';
+    document.getElementById('studentAnswer').style.display = 'none';
+    document.getElementById('mcqOptions').classList.remove('visible');
+    document.getElementById('visualNote').classList.remove('visible');
     document.getElementById('feedbackCard').classList.remove('visible');
     document.getElementById('progressFill').style.width = '100%';
     document.getElementById('progressLabel').textContent = `${questions.length} / ${questions.length}`;
@@ -449,19 +561,22 @@ function toggleModel() {
   if (modelShown) {
     ma.classList.remove('visible'); modelShown = false;
   } else {
-    ma.textContent = questions[current]?.answer || 'No model answer available.';
+    ma.textContent = formatAnswerText(questions[current]?.answer);
     ma.classList.add('visible');    modelShown = true;
   }
 }
 
 // ---- CHECK ANSWER ----
 async function checkAnswer(evt) {
-  const student = document.getElementById('studentAnswer').value.trim();
-  if (!student) { document.getElementById('studentAnswer').focus(); return; }
-
   const q             = questions[current];
   const correct       = q.answer        || '';
   const question_text = q.question_text || '';
+  const mcq           = detectMcq(question_text);
+  const student       = (mcq ? selectedMcq : document.getElementById('studentAnswer').value).trim();
+  if (!student) {
+    if (!mcq) document.getElementById('studentAnswer').focus();
+    return;
+  }
 
   const btn = document.getElementById('checkBtn');
   btn.disabled = true; btn.textContent = '⏳ Marking…';

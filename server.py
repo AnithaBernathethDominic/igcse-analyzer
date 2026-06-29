@@ -512,6 +512,52 @@ def feedback():
     correct  = data_in.get("correct", "").strip()
     question = data_in.get("question_text", "").strip()
 
+    def _score_mcq(student_ans, mark_scheme, q_text):
+        q_clean = re.sub(r'\s+', ' ', q_text).strip()
+        if not re.search(r'(?i)\b(tick|circle|choose|select)\b.*\b(A|B|C|D)\b', q_clean):
+            return None
+
+        s = student_ans.strip().upper()
+        if not re.fullmatch(r'[A-D]', s):
+            return None
+
+        cleaned_ms = re.sub(r'(?i)\b(one|two|three|four)\s+mark[s]?\b', ' ', mark_scheme)
+        cleaned_ms = re.sub(r'(?i)\b(mark|answer|correct|box|tick)\b', ' ', cleaned_ms)
+        letters = re.findall(r'(?<![A-Z])([A-D])(?![A-Z])', cleaned_ms.upper())
+        if not letters:
+            compact = re.sub(r'[^A-D]', '', cleaned_ms.upper())
+            if len(compact) == 1:
+                letters = [compact]
+        if not letters:
+            return None
+
+        expected = letters[0]
+        correct_match = s == expected
+        return {
+            "marks_awarded": 1 if correct_match else 0,
+            "max_marks": 1,
+            "examiner_comment": (
+                f"Correct. Option {expected} is the answer."
+                if correct_match else
+                f"Option {s} is not correct. The correct answer is option {expected}."
+            ),
+            "how_to_improve": (
+                "" if correct_match else
+                "For multiple-choice questions, compare each option with the keyword in the question before choosing."
+            ),
+            "what_was_good": (
+                "You selected the correct option."
+                if correct_match else
+                "You selected an option, but it did not match the mark scheme."
+            ),
+            "matched_points": [expected] if correct_match else [],
+            "missing_points": [] if correct_match else [expected],
+            "highlighted_answer": (
+                f"<mark class='hit'>{html_lib.escape(s)}</mark>"
+                if correct_match else html_lib.escape(s)
+            )
+        }
+
     def ai_evaluate(student_ans, mark_scheme, q_text):
         system_prompt = """You are a strict but fair IGCSE Computer Science examiner (Cambridge 0478).
 Your task: mark the student answer against the official mark scheme and give formative feedback.
@@ -687,7 +733,9 @@ Apply marking rules strictly. Return only JSON."""
         }
 
     try:
-        result = _score_exact_objective(student, correct, question)
+        result = _score_mcq(student, correct, question)
+        if result is None:
+            result = _score_exact_objective(student, correct, question)
         if result is None:
             result = ai_evaluate(student, correct, question)
     except Exception as e:
