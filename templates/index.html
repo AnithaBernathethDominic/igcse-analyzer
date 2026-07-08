@@ -6,74 +6,185 @@
 </head>
 <body>
 
-<h2>Upload Question Paper & Mark Scheme</h2>
+<main class="page">
+    <section class="upload-panel">
+        <h1>Upload Question Paper & Mark Scheme</h1>
+        <form id="uploadForm">
+            <label>
+                Question paper
+                <input type="file" name="qp" accept="application/pdf" required>
+            </label>
+            <label>
+                Mark scheme
+                <input type="file" name="ms" accept="application/pdf" required>
+            </label>
+            <button type="submit">Extract</button>
+        </form>
+        <p id="statusText" class="status"></p>
+    </section>
 
-<form id="uploadForm">
-    <input type="file" name="qp" required>
-    <input type="file" name="ms" required>
-    <button type="submit">Upload</button>
-</form>
-
-<hr>
-
-<h2>Questions Table</h2>
-<table id="resultTable">
-    <thead>
-        <tr>
-            <th>Question</th>
-            <th>Question Text</th>
-            <th>Answer</th>
-            <th>Topic</th>
-        </tr>
-    </thead>
-    <tbody></tbody>
-</table>
+    <section id="reviewSection" class="review-section" hidden>
+        <div class="review-header">
+            <div>
+                <h2>Review extracted questions</h2>
+                <p id="paperName"></p>
+            </div>
+            <button id="saveBtn" type="button">Save to Supabase</button>
+        </div>
+        <div id="reviewList" class="review-list"></div>
+    </section>
+</main>
 
 <script>
+let currentPaperName = "";
+let currentQuestions = [];
+
+const statusText = document.getElementById("statusText");
+const reviewSection = document.getElementById("reviewSection");
+const reviewList = document.getElementById("reviewList");
+const paperNameEl = document.getElementById("paperName");
+const saveBtn = document.getElementById("saveBtn");
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function fieldValue(card, field) {
+    const input = card.querySelector(`[data-field="${field}"]`);
+    if (!input) return null;
+    if (input.type === "checkbox") return input.checked;
+    if (input.type === "number") return input.value === "" ? null : Number(input.value);
+    return input.value;
+}
+
+function renderReviewCards() {
+    reviewList.innerHTML = "";
+    currentQuestions.forEach((question, index) => {
+        const card = document.createElement("article");
+        card.className = `question-card${question.needs_review ? " review-warning" : ""}`;
+        card.dataset.index = index;
+        const questionNo = escapeHtml(question.question_no || question.question || "");
+        const questionText = escapeHtml(question.question_text || "");
+        const optionA = escapeHtml(question.option_a || "");
+        const optionB = escapeHtml(question.option_b || "");
+        const optionC = escapeHtml(question.option_c || "");
+        const optionD = escapeHtml(question.option_d || "");
+        const answer = escapeHtml(question.answer || "");
+        const imageUrl = escapeHtml(question.image_url || "");
+        const rawText = escapeHtml(question.raw_text || "");
+
+        card.innerHTML = `
+            <div class="card-head">
+                <label>Question No.
+                    <input data-field="question_no" value="${questionNo}">
+                </label>
+                <label>Marks
+                    <input data-field="marks" type="number" min="0" value="${question.marks ?? ""}">
+                </label>
+                <label class="check-row">
+                    <input data-field="needs_review" type="checkbox" ${question.needs_review ? "checked" : ""}>
+                    Needs review
+                </label>
+            </div>
+            <label>Question Text
+                <textarea data-field="question_text" rows="5">${questionText}</textarea>
+            </label>
+            <div class="options-grid">
+                <label>A <input data-field="option_a" value="${optionA}"></label>
+                <label>B <input data-field="option_b" value="${optionB}"></label>
+                <label>C <input data-field="option_c" value="${optionC}"></label>
+                <label>D <input data-field="option_d" value="${optionD}"></label>
+            </div>
+            <label>Answer
+                <textarea data-field="answer" rows="3">${answer}</textarea>
+            </label>
+            <label>Image URL
+                <input data-field="image_url" value="${imageUrl}">
+            </label>
+            ${question.image_url ? `<img class="question-image" src="${imageUrl}" alt="Question diagram preview">` : ""}
+            <details>
+                <summary>Raw extracted text</summary>
+                <textarea data-field="raw_text" rows="4">${rawText}</textarea>
+            </details>
+        `;
+
+        reviewList.appendChild(card);
+    });
+}
+
+function collectEditedQuestions() {
+    return Array.from(document.querySelectorAll(".question-card")).map((card, index) => {
+        const original = currentQuestions[index];
+        const questionNo = fieldValue(card, "question_no");
+        return {
+            ...original,
+            question: questionNo,
+            question_no: questionNo,
+            question_text: fieldValue(card, "question_text"),
+            option_a: fieldValue(card, "option_a") || null,
+            option_b: fieldValue(card, "option_b") || null,
+            option_c: fieldValue(card, "option_c") || null,
+            option_d: fieldValue(card, "option_d") || null,
+            marks: fieldValue(card, "marks"),
+            image_url: fieldValue(card, "image_url") || null,
+            answer: fieldValue(card, "answer"),
+            raw_text: fieldValue(card, "raw_text"),
+            needs_review: fieldValue(card, "needs_review"),
+            extraction_confidence: fieldValue(card, "needs_review") ? "poor" : "good",
+        };
+    });
+}
+
 document.getElementById("uploadForm").onsubmit = async function(e) {
     e.preventDefault();
+    statusText.textContent = "Extracting questions...";
+    reviewSection.hidden = true;
 
-    let formData = new FormData(this);
+    const formData = new FormData(this);
+    const res = await fetch("/upload", { method: "POST", body: formData });
 
-   
-    let res = await fetch("/upload", {
-    method: "POST",
-    body: formData
-    });
-
-   if (!res.ok) {
-      let text = await res.text();
-      console.error("Server Error:", text);
-      alert("Upload failed");
-      return;
-     }
-
-
-    let data = await res.json();
-
-    console.log(data);
-
-    let table = document.querySelector("#resultTable tbody");
-
-    if (!table) {
-        console.log("Table not found ❌");
+    if (!res.ok) {
+        const text = await res.text();
+        console.error("Server Error:", text);
+        statusText.textContent = "Upload failed.";
         return;
     }
 
-    table.innerHTML = "";
+    const data = await res.json();
+    currentPaperName = data.paper_name;
+    currentQuestions = data.questions || [];
+    paperNameEl.textContent = `${currentPaperName} - ${currentQuestions.length} questions`;
+    renderReviewCards();
+    reviewSection.hidden = false;
+    statusText.textContent = "Review the extraction before saving.";
+};
 
-    data.forEach(row => {
-        let tr = document.createElement("tr");
+saveBtn.onclick = async function() {
+    saveBtn.disabled = true;
+    statusText.textContent = "Saving questions...";
+    currentQuestions = collectEditedQuestions();
 
-        tr.innerHTML = `
-            <td>${row.question}</td>
-            <td>${row.question_text}</td>
-            <td>${row.answer}</td>
-            <td>${row.topic}</td>
-        `;
-
-        table.appendChild(tr);
+    const res = await fetch("/save-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paper_name: currentPaperName, questions: currentQuestions }),
     });
+
+    saveBtn.disabled = false;
+    if (!res.ok) {
+        const text = await res.text();
+        console.error("Save Error:", text);
+        statusText.textContent = "Save failed.";
+        return;
+    }
+
+    const data = await res.json();
+    statusText.textContent = `Saved ${data.saved} questions.`;
 };
 </script>
 

@@ -60,6 +60,23 @@ main{padding:28px 32px;display:flex;flex-direction:column;gap:18px;min-width:0}
 .empty-icon{font-size:3rem;opacity:.4}
 .empty-state h3{font-family:'DM Serif Display',serif;font-size:1.4rem;opacity:.5}
 
+/* LOGIN */
+.auth-screen{position:fixed;inset:0;background:var(--paper);z-index:500;
+  display:flex;align-items:center;justify-content:center;padding:24px}
+.auth-panel{width:min(420px,100%);background:var(--card);border:1px solid var(--border);
+  border-radius:12px;box-shadow:var(--shadow);padding:28px}
+.auth-panel h1{font-family:'DM Serif Display',serif;font-size:1.55rem;margin-bottom:8px}
+.auth-panel p{font-size:.9rem;line-height:1.55;color:var(--muted);margin-bottom:18px}
+.auth-form{display:flex;flex-direction:column;gap:10px}
+.auth-form input{width:100%;padding:11px 12px;border:1.5px solid var(--border);
+  border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.92rem;outline:none}
+.auth-form input:focus{border-color:var(--accent)}
+.auth-error{display:none;font-size:.8rem;color:var(--danger);line-height:1.45}
+.auth-error.visible{display:block}
+.user-chip{display:none;align-items:center;gap:8px;font-size:.78rem;color:#cbd5e1}
+.user-chip.visible{display:flex}
+.btn-small{padding:5px 9px;font-size:.72rem;border-radius:7px}
+
 /* PROGRESS */
 .progress-wrap{display:flex;align-items:center;gap:12px}
 .progress-label{font-size:.78rem;font-weight:600;color:var(--muted);white-space:nowrap}
@@ -97,6 +114,16 @@ textarea::placeholder{color:#b5b0a8}
   background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-top:12px}
 .visual-note.visible{display:block}
 .q-text strong{font-weight:700}
+.formatted-lines{display:flex;flex-direction:column;gap:7px}
+.formatted-line{line-height:1.55}
+.formatted-line.prompt{margin-bottom:4px}
+.formatted-line.label{font-weight:700;color:#374151;margin-top:6px}
+.formatted-line.indent{padding-left:18px;border-left:2px solid var(--border)}
+.inline-table{display:grid;grid-template-columns:minmax(130px,.7fr) 1.4fr;gap:0;
+  border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:10px}
+.inline-cell{padding:9px 11px;border-bottom:1px solid var(--border);background:#fff}
+.inline-cell:nth-child(odd){font-weight:700;background:#f8fafc;border-right:1px solid var(--border)}
+.inline-cell:nth-last-child(-n+2){border-bottom:none}
 
 /* BUTTONS */
 .btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -173,9 +200,28 @@ textarea::placeholder{color:#b5b0a8}
 </style>
 </head>
 <body>
+<div class="auth-screen" id="authScreen">
+  <div class="auth-panel">
+    <h1>IGCSE CS Practice</h1>
+    <p>Sign in to access the question bank.</p>
+    <form class="auth-form" id="loginForm">
+      <input id="loginEmail" type="email" placeholder="Email" autocomplete="email" required>
+      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button class="btn btn-primary" type="submit" id="loginBtn">Sign In</button>
+      <div class="auth-error" id="authError"></div>
+    </form>
+  </div>
+</div>
+
 <header>
   <div class="logo">IGCSE <span>CS</span> Practice</div>
-  <div class="badge">0478 · Paper 1</div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div class="user-chip" id="userChip">
+      <span id="userEmail"></span>
+      <button class="btn btn-ghost btn-small" type="button" id="logoutBtn">Sign Out</button>
+    </div>
+    <div class="badge">0478 · Paper 1</div>
+  </div>
 </header>
 
 <div class="shell">
@@ -198,8 +244,8 @@ textarea::placeholder{color:#b5b0a8}
 
       <!-- Tab bar -->
       <div class="tab-bar">
-        <div class="tab active" id="tabPractice" onclick="switchTab('practice')">✏️ Practice</div>
-        <div class="tab"        id="tabAll"      onclick="switchTab('all')">📋 All Questions</div>
+        <div class="tab active" id="tabPractice">✏️ Practice</div>
+        <div class="tab"        id="tabAll">📋 All Questions</div>
       </div>
 
       <!-- ===== PRACTICE TAB ===== -->
@@ -228,11 +274,11 @@ textarea::placeholder{color:#b5b0a8}
 
         <!-- Buttons -->
         <div class="btn-row">
-          <button class="btn btn-primary" id="checkBtn" onclick="checkAnswer(event)">✓ Check Answer</button>
-          <button class="btn btn-ghost"   onclick="toggleModel()">👁 Show Answer</button>
+          <button class="btn btn-primary" id="checkBtn">✓ Check Answer</button>
+          <button class="btn btn-ghost" id="showAnswerBtn">👁 Show Answer</button>
           <div style="flex:1"></div>
-          <button class="btn btn-nav" id="prevBtn" onclick="prevQuestion()" disabled>← Prev</button>
-          <button class="btn btn-nav" id="nextBtn" onclick="nextQuestion()">Next →</button>
+          <button class="btn btn-nav" id="prevBtn" disabled>← Prev</button>
+          <button class="btn btn-nav" id="nextBtn">Next →</button>
         </div>
 
         <!-- Model answer -->
@@ -290,7 +336,12 @@ textarea::placeholder{color:#b5b0a8}
   </main>
 </div>
 
-<script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+
 // ---- STATE ----
 let questions    = [];
 let current      = 0;
@@ -298,6 +349,8 @@ let modelShown   = false;
 let activeTab    = 'practice';
 let activeTopic  = '';
 let selectedMcq  = '';
+let auth          = null;
+let currentUser   = null;
 
 const DOT_COLORS = [
   '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
@@ -331,11 +384,128 @@ function detectMcq(text) {
   return {prompt, options};
 }
 
+function cleanExtractedText(text) {
+  return stripQuestionPrefix(text)
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
+}
+
+function splitAtFirstMarker(source, markers) {
+  let first = -1;
+  markers.forEach(marker => {
+    const idx = source.search(marker);
+    if (idx >= 0 && (first === -1 || idx < first)) first = idx;
+  });
+  if (first <= 0) return {prompt: source, rest: ''};
+  return {
+    prompt: source.slice(0, first).trim(),
+    rest: source.slice(first).trim()
+  };
+}
+
+function renderLineBlocks(lines) {
+  const html = lines
+    .filter(line => line.text && line.text.trim())
+    .map(line => `<div class="formatted-line ${line.cls || ''}">${escapeHtml(line.text.trim())}</div>`)
+    .join('');
+  return `<div class="formatted-lines">${html}</div>`;
+}
+
+function formatPacketDiagram(source) {
+  if (!/\bpacket\b/i.test(source) || !/\b(first|second|third)\s+section\b/i.test(source)) {
+    return null;
+  }
+  const split = splitAtFirstMarker(source, [/\bPacket\b/i, /\bThe first section\b/i]);
+  let rest = split.rest || source;
+  rest = rest
+    .replace(/\bPacket\b/gi, '\nPacket')
+    .replace(/\bThe first section is called\b/gi, '\nFirst section is called')
+    .replace(/\bThe second section is called\b/gi, '\nSecond section is called')
+    .replace(/\bThe third section is called\b/gi, '\nThird section is called')
+    .replace(/\b(First|Second|Third)\s+Example\b/g, '$1\nExample')
+    .replace(/\bExample\b/g, '\nExample');
+
+  const lines = [];
+  if (split.prompt && split.prompt !== source) lines.push({text: split.prompt, cls: 'prompt'});
+  rest.split(/\n+/).forEach(part => {
+    const text = part.trim();
+    if (!text) return;
+    const isLabel = /^(Packet|First section|Second section|Third section|Example)/i.test(text);
+    lines.push({text, cls: isLabel ? 'indent' : ''});
+  });
+  return renderLineBlocks(lines);
+}
+
+function formatTermDescriptionTable(source) {
+  const headerMatch = source.match(/\b(Term|Component|Field|Item)\s+(Description|Definition)\b/i);
+  if (!headerMatch) return null;
+  const split = splitAtFirstMarker(source, [/\b(Term|Component|Field|Item)\s+(Description|Definition)\b/i]);
+  const tableText = split.rest.replace(/\b(Term|Component|Field|Item)\s+(Description|Definition)\b/i, '').trim();
+  const rowStarts = [
+    'character set', 'sample rate', 'sampling rate', 'pixel', 'resolution',
+    'colour depth', 'color depth', 'bit depth', 'metadata', 'header',
+    'payload', 'trailer', 'packet', 'file header'
+  ];
+  const rowRegex = new RegExp(`\\b(${rowStarts.map(s => s.replace(/\s+/g, '\\s+')).join('|')})\\b`, 'gi');
+  const marked = tableText.replace(rowRegex, '\n$1');
+  const parts = marked.split(/\n+/).map(p => p.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+
+  let html = '';
+  if (split.prompt) {
+    html += `<div class="formatted-line prompt">${escapeHtml(split.prompt)}</div>`;
+  }
+  html += '<div class="inline-table">';
+  html += `<div class="inline-cell">${escapeHtml(headerMatch[1])}</div>`;
+  html += `<div class="inline-cell">${escapeHtml(headerMatch[2])}</div>`;
+  parts.forEach(part => {
+    const definitionStart = part.search(/\b(This is|It is|This stores|The number|This stores|These are)\b/i);
+    if (definitionStart > 0) {
+      html += `<div class="inline-cell">${escapeHtml(part.slice(0, definitionStart).trim())}</div>`;
+      html += `<div class="inline-cell">${escapeHtml(part.slice(definitionStart).trim())}</div>`;
+    } else {
+      html += `<div class="inline-cell">${escapeHtml(part)}</div>`;
+      html += '<div class="inline-cell"></div>';
+    }
+  });
+  html += '</div>';
+  return `<div class="formatted-lines">${html}</div>`;
+}
+
+function formatGenericDiagramText(source) {
+  if (!/\b(diagram|table|complete|section|example)\b/i.test(source)) return null;
+  const split = splitAtFirstMarker(source, [
+    /\bPacket\b/i, /\bFirst\b/i, /\bSecond\b/i, /\bThird\b/i,
+    /\bExample\b/i, /\bTerm\b/i, /\bDescription\b/i
+  ]);
+  if (!split.rest || split.rest.length < 20) return null;
+  const rest = split.rest
+    .replace(/\b(Packet|Header|Payload|Trailer|First|Second|Third|Example|Term|Description|Definition)\b/g, '\n$1')
+    .replace(/\b(This is|It is|This stores|The number)\b/g, '\n$1')
+    .replace(/\n{2,}/g, '\n');
+  const lines = [];
+  if (split.prompt) lines.push({text: split.prompt, cls: 'prompt'});
+  rest.split(/\n+/).forEach(part => {
+    const text = part.trim();
+    if (text) lines.push({text, cls: /^(Packet|Header|Payload|Trailer|First|Second|Third|Example|Term|Description|Definition)$/i.test(text) ? 'label' : 'indent'});
+  });
+  return renderLineBlocks(lines);
+}
+
 function formatQuestionHtml(text, mcq) {
-  let source = stripQuestionPrefix(text);
+  let source = cleanExtractedText(text);
   if (mcq) source = mcq.prompt;
+  const structured =
+    formatTermDescriptionTable(source) ||
+    formatPacketDiagram(source) ||
+    formatGenericDiagramText(source);
+  if (structured) return structured;
+
   source = source
     .replace(/\b(Term)\s+(Description|Definition)\b/gi, '\n\n$1 | $2\n')
+    .replace(/\b(Packet|Header|Payload|Trailer)\b/g, '\n$1')
+    .replace(/\b(The first section|The second section|The third section|Example)\b/g, '\n$1')
     .replace(/\b(character set|sample rate|pixel|resolution|colour depth|color depth|bit depth|metadata|header)\b/gi, '\n$1')
     .replace(/\b(This is|It is|This stores|The number)\b/g, '\n$1')
     .replace(/\s*\/\/\s*/g, '\nOR ')
@@ -347,6 +517,8 @@ function formatQuestionHtml(text, mcq) {
 function formatAnswerText(answer) {
   return String(answer || 'No model answer available.')
     .replace(/\b(Term)\s+(Description|Definition)\b/gi, '$1 | $2\n')
+    .replace(/\b(Packet|Header|Payload|Trailer)\b/g, '\n$1')
+    .replace(/\b(The first section|The second section|The third section|Example)\b/g, '\n$1')
     .replace(/\b(character set|sample rate|pixel|resolution|colour depth|color depth|bit depth|metadata|header)\b/gi, '\n$1')
     .replace(/\b(This is|It is|This stores|The number)\b/g, '\n$1')
     .replace(/\s*\/\/\s*/g, '\nOR ')
@@ -358,16 +530,69 @@ function shouldShowVisualNote(text) {
   return /\b(image|diagram|figure|picture|table|boxes?|tick)\b/i.test(text || '');
 }
 
+async function authFetch(url, options = {}) {
+  if (!currentUser) throw new Error("Not signed in");
+  const token = await currentUser.getIdToken();
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", `Bearer ${token}`);
+  return fetch(url, {...options, headers});
+}
+
+async function initAuth() {
+  const configRes = await fetch('/firebase-config');
+  const firebaseConfig = await configRes.json();
+  const missing = Object.entries(firebaseConfig).filter(([, value]) => !value).map(([key]) => key);
+  if (missing.length) {
+    document.getElementById('authError').textContent =
+      `Firebase config missing on server: ${missing.join(', ')}`;
+    document.getElementById('authError').classList.add('visible');
+    return;
+  }
+
+  const app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+
+  document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const error = document.getElementById('authError');
+    const btn = document.getElementById('loginBtn');
+    error.classList.remove('visible');
+    btn.disabled = true;
+    btn.textContent = 'Signing in...';
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (err) {
+      error.textContent = err.message || 'Sign in failed.';
+      error.classList.add('visible');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    }
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', () => signOut(auth));
+
+  onAuthStateChanged(auth, user => {
+    currentUser = user;
+    document.getElementById('authScreen').style.display = user ? 'none' : 'flex';
+    document.getElementById('userChip').classList.toggle('visible', !!user);
+    document.getElementById('userEmail').textContent = user?.email || '';
+    if (user) boot();
+  });
+}
+
 // ---- BOOT ----
 async function boot() {
   try {
-    const res  = await fetch('/topics/with-counts');
+    const res  = await authFetch('/topics/with-counts');
     const data = await res.json();
     renderSidebar(data);
   } catch(e) {
     // fallback: simple topics list
     try {
-      const res  = await fetch('/topics');
+      const res  = await authFetch('/topics');
       const data = await res.json();
       renderSidebar(data.map(t => ({topic:t, count:''})));
     } catch(_) {
@@ -418,7 +643,7 @@ async function selectTopic(topic, el, countId) {
   el.classList.add('active');
   activeTopic = topic;
 
-  const res  = await fetch(`/practice/${encodeURIComponent(topic)}`);
+    const res  = await authFetch(`/practice/${encodeURIComponent(topic)}`);
   questions  = await res.json();
   current    = 0;
   modelShown = false;
@@ -583,7 +808,7 @@ async function checkAnswer(evt) {
   showLoadingFeedback();
 
   try {
-    const res  = await fetch('/feedback', {
+    const res  = await authFetch('/feedback', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({student, correct, question_text})
     });
@@ -711,7 +936,14 @@ function renderGrid() {
   });
 }
 
-boot();
+document.getElementById('tabPractice').addEventListener('click', () => switchTab('practice'));
+document.getElementById('tabAll').addEventListener('click', () => switchTab('all'));
+document.getElementById('checkBtn').addEventListener('click', checkAnswer);
+document.getElementById('showAnswerBtn').addEventListener('click', toggleModel);
+document.getElementById('prevBtn').addEventListener('click', prevQuestion);
+document.getElementById('nextBtn').addEventListener('click', nextQuestion);
+
+initAuth();
 </script>
 </body>
 </html>

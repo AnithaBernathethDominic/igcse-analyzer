@@ -4,3 +4,4 @@ supabase
 gunicorn
 PyMuPDF
 anthropic
+firebase-admin

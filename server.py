@@ -1,12 +1,65 @@
 from flask import Flask, request, jsonify, render_template
+from functools import wraps
 import re
 import json
 import os
+import uuid
 import fitz  # PyMuPDF
 import anthropic
 from supabase import create_client
+import firebase_admin
+from firebase_admin import auth as firebase_auth
+from firebase_admin import credentials
 
 app = Flask(__name__)
+
+# ---------- FIREBASE AUTH CONFIG ----------
+FIREBASE_AUTH_DISABLED = os.getenv("FIREBASE_AUTH_DISABLED", "").lower() in ("1", "true", "yes")
+FIREBASE_CONFIG = {
+    "apiKey": os.getenv("FIREBASE_API_KEY", ""),
+    "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN", ""),
+    "projectId": os.getenv("FIREBASE_PROJECT_ID", ""),
+    "appId": os.getenv("FIREBASE_APP_ID", ""),
+}
+
+def init_firebase_admin():
+    if firebase_admin._apps:
+        return True
+    try:
+        service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+        if service_account_json:
+            cred = credentials.Certificate(json.loads(service_account_json))
+            firebase_admin.initialize_app(cred)
+        else:
+            firebase_admin.initialize_app()
+        return True
+    except Exception as e:
+        print(f"[Firebase auth disabled until configured] {e}")
+        return False
+
+FIREBASE_ADMIN_READY = init_firebase_admin()
+
+def require_auth(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if FIREBASE_AUTH_DISABLED:
+            return fn(*args, **kwargs)
+
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Firebase login required"}), 401
+
+        if not FIREBASE_ADMIN_READY:
+            return jsonify({"error": "Firebase Admin is not configured on the server"}), 503
+
+        token = auth_header.split(" ", 1)[1].strip()
+        try:
+            request.firebase_user = firebase_auth.verify_id_token(token)
+        except Exception:
+            return jsonify({"error": "Invalid or expired Firebase token"}), 401
+
+        return fn(*args, **kwargs)
+    return wrapper
 
 # ---------- SUPABASE CONFIG ----------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -187,8 +240,81 @@ def extract_text(file):
         text += page.get_text() + "\n"
     return text
 
+def extract_pdf_pages(file_bytes):
+    pages = []
+    pdf = fitz.open(stream=file_bytes, filetype="pdf")
+    for index, page in enumerate(pdf):
+        pages.append({"page_no": index + 1, "text": page.get_text(), "images": page.get_images(full=True)})
+    return pages
+
+def clean_extracted_text(text):
+    return (
+        text.replace("\r", "\n")
+        .replace("\t", " ")
+        .replace("\xa0", " ")
+    )
+
+def safe_storage_name(value):
+    return re.sub(r"[^a-zA-Z0-9._-]+", "_", value).strip("_") or "question"
+
+def upload_question_image(image_bytes, ext, paper_name, question_no):
+    if not image_bytes:
+        return None
+    safe_paper = safe_storage_name(os.path.splitext(paper_name)[0])
+    safe_question = safe_storage_name(question_no)
+    file_ext = (ext or "png").lower().lstrip(".")
+    content_type = "image/jpeg" if file_ext in ("jpg", "jpeg") else f"image/{file_ext}"
+    file_name = f"{safe_paper}/{safe_question}_{uuid.uuid4().hex}.{file_ext}"
+    try:
+        supabase.storage.from_("question-images").upload(
+            file_name,
+            image_bytes,
+            {"content-type": content_type, "upsert": "true"},
+        )
+        public = supabase.storage.from_("question-images").get_public_url(file_name)
+        if isinstance(public, str):
+            return public
+        return public.get("publicUrl") or public.get("public_url")
+    except Exception as e:
+        print(f"[Storage image upload skipped] {e}")
+        return None
+
+def extract_and_upload_question_images(file_bytes, paper_name):
+    image_by_question = {}
+    pdf = fitz.open(stream=file_bytes, filetype="pdf")
+    for page in pdf:
+        labels = re.findall(r"(?m)^\s*(\d{1,2})(?:\s*$|\s*\([a-h]\))", page.get_text())
+        labels = [label for label in labels if 1 <= int(label) <= 20]
+        if not labels:
+            continue
+
+        images = page.get_images(full=True)
+        if not images:
+            continue
+
+        main_q = labels[0]
+        if main_q in image_by_question:
+            continue
+
+        try:
+            image_info = pdf.extract_image(images[0][0])
+        except Exception as e:
+            print(f"[Image extract skipped] {e}")
+            continue
+
+        image_url = upload_question_image(
+            image_info.get("image"),
+            image_info.get("ext", "png"),
+            paper_name,
+            main_q,
+        )
+        if image_url:
+            image_by_question[main_q] = image_url
+    return image_by_question
+
 # ---------- STRIP ALL NOISE ----------
 def strip_all_noise(text):
+    text = clean_extracted_text(text)
     text = re.sub(r'\* \d{13} \*', ' ', text)
     text = re.sub(r',[\x00-\x1F\t]+,', ' ', text)
     text = re.sub(r'[^\x20-\x7E\n\'\"\\-]+', ' ', text)
@@ -216,7 +342,6 @@ def strip_all_noise(text):
     text = re.sub(r'Permission to reproduce.*', ' ', text, flags=re.DOTALL)
     text = re.sub(r'(?m)^\s*\d{1,3}\s*$', ' ', text)
     text = re.sub(r'\.{5,}', '', text)
-    text = re.sub(r'\[\d+\]', '', text)
     text = re.sub(r'(?m)^\s*Working space\s*$', '', text, flags=re.IGNORECASE)
     text = re.sub(r'(?m)^\s*[12]\s*$', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
@@ -234,6 +359,53 @@ def clean_qtext(raw):
     text = re.sub(r'\bComponent\s+Description\b', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
+
+def parse_options(text):
+    match = re.search(r'\bA\s+(.+?)\s+B\s+(.+?)\s+C\s+(.+?)\s+D\s+(.+)$', text, re.DOTALL)
+    if not match:
+        return None
+    return {
+        "question_text": text[:match.start()].strip(),
+        "option_a": match.group(1).strip(),
+        "option_b": match.group(2).strip(),
+        "option_c": match.group(3).strip(),
+        "option_d": match.group(4).strip(),
+    }
+
+def parse_question_details(question_no, raw_question, cleaned_question_text):
+    marks = None
+    marks_match = re.search(r'\[(\d+)\]\s*$', raw_question.strip())
+    if not marks_match:
+        marks_match = re.search(r'\[(\d+)\]\s*$', cleaned_question_text.strip())
+    if marks_match:
+        marks = int(marks_match.group(1))
+        cleaned_question_text = re.sub(r'\[(\d+)\]\s*$', '', cleaned_question_text).strip()
+
+    options = parse_options(cleaned_question_text)
+    if options:
+        cleaned_question_text = options["question_text"]
+
+    needs_review = (
+        not question_no
+        or len(cleaned_question_text) < 10
+        or "undefined" in cleaned_question_text.lower()
+        or len(cleaned_question_text.split()) < 3
+    )
+
+    return {
+        "question": question_no,
+        "question_no": question_no,
+        "question_text": cleaned_question_text,
+        "option_a": options["option_a"] if options else None,
+        "option_b": options["option_b"] if options else None,
+        "option_c": options["option_c"] if options else None,
+        "option_d": options["option_d"] if options else None,
+        "marks": marks,
+        "image_url": None,
+        "raw_text": raw_question,
+        "needs_review": needs_review,
+        "extraction_confidence": "poor" if needs_review else "good",
+    }
 
 # ---------- CONTEXT DETECTION ----------
 CONTEXT_REF_PATTERNS = [
@@ -314,7 +486,7 @@ def parse_qp(raw_text):
         if not sub_matches:
             cleaned = clean_qtext(block)
             if len(cleaned) > 15:
-                questions.append({"question": str(q_num), "question_text": cleaned})
+                questions.append(parse_question_details(str(q_num), block, cleaned))
             continue
 
         for s_idx, s_match in enumerate(sub_matches):
@@ -339,14 +511,14 @@ def parse_qp(raw_text):
                     if len(cleaned) > 15:
                         if context_prefix and has_context_reference(cleaned):
                             cleaned = context_prefix + cleaned
-                        questions.append({"question": qid, "question_text": cleaned})
+                        questions.append(parse_question_details(qid, ss_text, cleaned))
             else:
                 qid     = f"{q_num}({sub_id})"
                 cleaned = clean_qtext(sub_text)
                 if len(cleaned) > 15:
                     if context_prefix and has_context_reference(cleaned):
                         cleaned = context_prefix + cleaned
-                    questions.append({"question": qid, "question_text": cleaned})
+                    questions.append(parse_question_details(qid, sub_text, cleaned))
 
     unique = {}
     for q in questions:
@@ -430,7 +602,17 @@ def merge(qp, ms):
         td = map_topic_details(q["question_text"])
         result.append({
             "question":          q_key,
+            "question_no":       q.get("question_no", q_key),
             "question_text":     q["question_text"],
+            "option_a":          q.get("option_a"),
+            "option_b":          q.get("option_b"),
+            "option_c":          q.get("option_c"),
+            "option_d":          q.get("option_d"),
+            "marks":             q.get("marks"),
+            "image_url":         q.get("image_url"),
+            "raw_text":          q.get("raw_text", q["question_text"]),
+            "needs_review":      q.get("needs_review", False),
+            "extraction_confidence": q.get("extraction_confidence", "good"),
             "answer":            ans,
             "topic":             td["topic"],
             "main_topic":        td["main_topic"],
@@ -443,14 +625,29 @@ def merge(qp, ms):
 
 # ---------- SAVE ----------
 def save_to_db(data, paper_name):
+    rows = []
     for item in data:
-        supabase.table("questions").insert({
+        question_text = item.get("question_text", "")
+        td = map_topic_details(question_text)
+        rows.append({
             "paper":         paper_name,
-            "question_no":   item["question"],
-            "question_text": item["question_text"],
+            "question_no":   item.get("question_no") or item.get("question"),
+            "question_text": question_text,
+            "option_a":      item.get("option_a"),
+            "option_b":      item.get("option_b"),
+            "option_c":      item.get("option_c"),
+            "option_d":      item.get("option_d"),
+            "marks":         item.get("marks"),
+            "image_url":     item.get("image_url"),
+            "raw_text":      item.get("raw_text"),
+            "needs_review":  item.get("needs_review", False),
+            "extraction_confidence": item.get("extraction_confidence", "good"),
             "answer":        item.get("answer", ""),
-            "topic":         item.get("topic", "General"),
-        }).execute()
+            "topic":         item.get("topic") or td["topic"],
+        })
+    if not rows:
+        return []
+    return supabase.table("questions").insert(rows).execute().data
 
 # ---------- ROUTES ----------
 @app.route("/")
@@ -461,26 +658,51 @@ def index():
 def practice_page():
     return render_template("practice.html")
 
+@app.route("/firebase-config")
+def firebase_config():
+    return jsonify(FIREBASE_CONFIG)
+
 @app.route("/upload", methods=["POST"])
 def upload():
     try:
         qp_file    = request.files["qp"]
         ms_file    = request.files["ms"]
         paper_name = qp_file.filename
-        qp_text    = extract_text(qp_file)
-        ms_text    = extract_text(ms_file)
+        qp_bytes   = qp_file.read()
+        ms_bytes   = ms_file.read()
+        qp_pages   = extract_pdf_pages(qp_bytes)
+        ms_pages   = extract_pdf_pages(ms_bytes)
+        qp_text    = "\n".join(page["text"] for page in qp_pages)
+        ms_text    = "\n".join(page["text"] for page in ms_pages)
         qp_data    = parse_qp(qp_text)
         ms_data    = parse_ms(ms_text)
+        image_map  = extract_and_upload_question_images(qp_bytes, paper_name)
+        for question in qp_data:
+            main_q = re.match(r"^(\d{1,2})", question.get("question", ""))
+            if main_q:
+                question["image_url"] = image_map.get(main_q.group(1))
         print("QP DATA:", qp_data)
         print("MS DATA:", ms_data)
         final_data = merge(qp_data, ms_data)
-        save_to_db(final_data, paper_name)
-        return jsonify(final_data)
+        return jsonify({"paper_name": paper_name, "questions": final_data})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/save-questions", methods=["POST"])
+def save_questions():
+    try:
+        payload = request.get_json(force=True)
+        paper_name = payload.get("paper_name") or "Uploaded paper"
+        questions = payload.get("questions") or []
+        saved = save_to_db(questions, paper_name)
+        return jsonify({"saved": len(saved), "questions": saved})
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route("/topics")
+@require_auth
 def get_topics():
     """Return sorted unique topic strings."""
     resp   = supabase.table("questions").select("topic").execute()
@@ -488,6 +710,7 @@ def get_topics():
     return jsonify(topics)
 
 @app.route("/topics/with-counts")
+@require_auth
 def get_topics_with_counts():
     """Return [{topic, count}] for sidebar badges."""
     resp = supabase.table("questions").select("topic").execute()
@@ -499,11 +722,13 @@ def get_topics_with_counts():
     return jsonify(result)
 
 @app.route("/practice/<path:topic>")
+@require_auth
 def practice(topic):
     resp = supabase.table("questions").select("*").eq("topic", topic).execute()
     return jsonify(resp.data)
 
 @app.route("/feedback", methods=["POST"])
+@require_auth
 def feedback():
     import html as html_lib
 
@@ -517,8 +742,20 @@ def feedback():
         if not re.search(r'(?i)\b(tick|circle|choose|select)\b.*\b(A|B|C|D)\b', q_clean):
             return None
 
-        s = student_ans.strip().upper()
-        if not re.fullmatch(r'[A-D]', s):
+        def normalise_option_text(value):
+            value = value.lower()
+            value = re.sub(r'\([^)]*\)', ' ', value)
+            value = re.sub(r'[^a-z0-9]+', ' ', value)
+            return re.sub(r'\s+', ' ', value).strip()
+
+        option_matches = re.findall(
+            r'(?:^|\s)([A-D])\s+(.+?)(?=\s+[A-D]\s+|$)', q_clean)
+        options = {
+            letter.upper(): text.strip(" .;,")
+            for letter, text in option_matches
+            if text.strip()
+        }
+        if len(options) < 2:
             return None
 
         cleaned_ms = re.sub(r'(?i)\b(one|two|three|four)\s+mark[s]?\b', ' ', mark_scheme)
@@ -532,14 +769,25 @@ def feedback():
             return None
 
         expected = letters[0]
-        correct_match = s == expected
+        expected_text = options.get(expected, "")
+        expected_display = f"{expected} - {expected_text}" if expected_text else expected
+        s_raw = student_ans.strip()
+        s_letter = s_raw.upper()
+        s_text = normalise_option_text(s_raw)
+        correct_match = (
+            s_letter == expected or
+            (expected_text and s_text == normalise_option_text(expected_text))
+        )
+        selected_display = (
+            f"{s_letter} - {options[s_letter]}" if s_letter in options else s_raw
+        )
         return {
             "marks_awarded": 1 if correct_match else 0,
             "max_marks": 1,
             "examiner_comment": (
-                f"Correct. Option {expected} is the answer."
+                f"Correct. {expected_display} is the answer."
                 if correct_match else
-                f"Option {s} is not correct. The correct answer is option {expected}."
+                f"{selected_display} is not correct. The correct answer is {expected_display}."
             ),
             "how_to_improve": (
                 "" if correct_match else
@@ -550,11 +798,11 @@ def feedback():
                 if correct_match else
                 "You selected an option, but it did not match the mark scheme."
             ),
-            "matched_points": [expected] if correct_match else [],
-            "missing_points": [] if correct_match else [expected],
+            "matched_points": [expected_display] if correct_match else [],
+            "missing_points": [] if correct_match else [expected_display],
             "highlighted_answer": (
-                f"<mark class='hit'>{html_lib.escape(s)}</mark>"
-                if correct_match else html_lib.escape(s)
+                f"<mark class='hit'>{html_lib.escape(s_raw)}</mark>"
+                if correct_match else html_lib.escape(s_raw)
             )
         }
 
