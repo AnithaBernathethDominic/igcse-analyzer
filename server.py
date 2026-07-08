@@ -279,35 +279,87 @@ def upload_question_image(image_bytes, ext, paper_name, question_no):
         print(f"[Storage image upload skipped] {e}")
         return None
 
+def text_mentions_diagram(text):
+    return bool(re.search(r"\b(diagram|annotate|shown|below|complete)\b", text or "", re.IGNORECASE))
+
+def page_question_labels(text):
+    labels = []
+    current_main = None
+    for line in text.splitlines():
+        clean = line.strip()
+        main_match = re.fullmatch(r"(\d{1,2})", clean)
+        if main_match:
+            value = int(main_match.group(1))
+            if 1 <= value <= 20:
+                current_main = main_match.group(1)
+                labels.append(current_main)
+            continue
+
+        sub_match = re.fullmatch(r"\(([a-h])\)", clean, re.IGNORECASE)
+        if sub_match and current_main:
+            labels.append(f"{current_main}({sub_match.group(1).lower()})")
+            continue
+
+        ss_match = re.fullmatch(r"\((i{1,3}|iv|vi{0,3}|ix|xi{0,3})\)", clean, re.IGNORECASE)
+        if ss_match and labels:
+            parent = labels[-1]
+            if re.match(r"^\d{1,2}\([a-h]\)$", parent):
+                labels.append(f"{parent}({ss_match.group(1).lower()})")
+
+    return labels
+
+def render_diagram_crop(page):
+    hits = page.search_for("diagram") or page.search_for("shown") or page.search_for("below")
+    if not hits:
+        return None
+
+    page_rect = page.rect
+    y0 = min(hit.y1 for hit in hits) + 12
+    if y0 > page_rect.height * 0.75:
+        y0 = page_rect.height * 0.35
+
+    clip = fitz.Rect(
+        page_rect.width * 0.08,
+        y0,
+        page_rect.width * 0.92,
+        page_rect.height * 0.90,
+    )
+    if clip.height < 80:
+        return None
+
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip, alpha=False)
+    return pixmap.tobytes("png")
+
 def extract_and_upload_question_images(file_bytes, paper_name):
     image_by_question = {}
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
     for page in pdf:
-        labels = re.findall(r"(?m)^\s*(\d{1,2})(?:\s*$|\s*\([a-h]\))", page.get_text())
-        labels = [label for label in labels if 1 <= int(label) <= 20]
+        page_text = page.get_text()
+        labels = page_question_labels(page_text)
         if not labels:
             continue
 
         images = page.get_images(full=True)
-        if not images:
-            continue
-
         main_q = labels[0]
         if main_q in image_by_question:
             continue
 
-        try:
-            image_info = pdf.extract_image(images[0][0])
-        except Exception as e:
-            print(f"[Image extract skipped] {e}")
-            continue
+        image_url = None
+        if images:
+            try:
+                image_info = pdf.extract_image(images[0][0])
+                image_url = upload_question_image(
+                    image_info.get("image"),
+                    image_info.get("ext", "png"),
+                    paper_name,
+                    main_q,
+                )
+            except Exception as e:
+                print(f"[Image extract skipped] {e}")
 
-        image_url = upload_question_image(
-            image_info.get("image"),
-            image_info.get("ext", "png"),
-            paper_name,
-            main_q,
-        )
+        if not image_url and text_mentions_diagram(page_text):
+            image_url = upload_question_image(render_diagram_crop(page), "png", paper_name, main_q)
+
         if image_url:
             image_by_question[main_q] = image_url
     return image_by_question
@@ -351,8 +403,6 @@ def strip_all_noise(text):
 # ---------- CLEAN QUESTION TEXT ----------
 def clean_qtext(raw):
     text = strip_all_noise(raw)
-    text = re.sub(r'\b[A-D]\s+(input|output|process|storage|compil\w*|interpret\w*)\b[^\n]*',
-                  '', text, flags=re.IGNORECASE)
     text = re.sub(r"URL input into\s*patient.?s computer", '', text)
     text = re.sub(r"Patient.?s\s*computer", '', text)
     text = re.sub(r'www\.[a-zA-Z0-9.\-]+\.com\b', '', text)
@@ -361,7 +411,11 @@ def clean_qtext(raw):
     return text
 
 def parse_options(text):
-    match = re.search(r'\bA\s+(.+?)\s+B\s+(.+?)\s+C\s+(.+?)\s+D\s+(.+)$', text, re.DOTALL)
+    match = re.search(
+        r'(?:^|\s)A\s+(.+?)\s+B\s+(.+?)\s+C\s+(.+?)\s+D\s+(.+?)(?:\s*\[\d+\]\s*)?$',
+        text,
+        re.DOTALL,
+    )
     if not match:
         return None
     return {
@@ -373,6 +427,13 @@ def parse_options(text):
     }
 
 def parse_question_details(question_no, raw_question, cleaned_question_text):
+    cleaned_question_text = re.sub(
+        r'^\s*\([a-z]\)(?:\s+|$)',
+        '',
+        cleaned_question_text,
+        flags=re.IGNORECASE,
+    ).strip()
+
     marks = None
     marks_match = re.search(r'\[(\d+)\]\s*$', raw_question.strip())
     if not marks_match:
@@ -677,10 +738,17 @@ def upload():
         qp_data    = parse_qp(qp_text)
         ms_data    = parse_ms(ms_text)
         image_map  = extract_and_upload_question_images(qp_bytes, paper_name)
+        question_counts = {}
         for question in qp_data:
             main_q = re.match(r"^(\d{1,2})", question.get("question", ""))
             if main_q:
-                question["image_url"] = image_map.get(main_q.group(1))
+                question_counts[main_q.group(1)] = question_counts.get(main_q.group(1), 0) + 1
+        for question in qp_data:
+            main_q = re.match(r"^(\d{1,2})", question.get("question", ""))
+            if main_q:
+                main_key = main_q.group(1)
+                if question_counts.get(main_key, 0) == 1 or text_mentions_diagram(question.get("question_text")):
+                    question["image_url"] = image_map.get(main_key)
         print("QP DATA:", qp_data)
         print("MS DATA:", ms_data)
         final_data = merge(qp_data, ms_data)
