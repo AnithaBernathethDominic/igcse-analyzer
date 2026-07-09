@@ -282,29 +282,28 @@ def upload_question_image(image_bytes, ext, paper_name, question_no):
 def text_mentions_diagram(text):
     return bool(re.search(r"\b(diagram|annotate|shown|below|complete)\b", text or "", re.IGNORECASE))
 
-def page_question_labels(text):
+def update_question_state_from_page(text, state):
     labels = []
-    current_main = None
     for line in text.splitlines():
         clean = line.strip()
         main_match = re.fullmatch(r"(\d{1,2})", clean)
         if main_match:
             value = int(main_match.group(1))
             if 1 <= value <= 20:
-                current_main = main_match.group(1)
-                labels.append(current_main)
+                state["main"] = main_match.group(1)
+                state["sub"] = None
+                labels.append(state["main"])
             continue
 
         sub_match = re.fullmatch(r"\(([a-h])\)", clean, re.IGNORECASE)
-        if sub_match and current_main:
-            labels.append(f"{current_main}({sub_match.group(1).lower()})")
+        if sub_match and state.get("main"):
+            state["sub"] = sub_match.group(1).lower()
+            labels.append(f"{state['main']}({state['sub']})")
             continue
 
         ss_match = re.fullmatch(r"\((i{1,3}|iv|vi{0,3}|ix|xi{0,3})\)", clean, re.IGNORECASE)
-        if ss_match and labels:
-            parent = labels[-1]
-            if re.match(r"^\d{1,2}\([a-h]\)$", parent):
-                labels.append(f"{parent}({ss_match.group(1).lower()})")
+        if ss_match and state.get("main") and state.get("sub"):
+            labels.append(f"{state['main']}({state['sub']})({ss_match.group(1).lower()})")
 
     return labels
 
@@ -333,15 +332,21 @@ def render_diagram_crop(page):
 def extract_and_upload_question_images(file_bytes, paper_name):
     image_by_question = {}
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
+    state = {"main": None, "sub": None}
     for page in pdf:
         page_text = page.get_text()
-        labels = page_question_labels(page_text)
+        labels = update_question_state_from_page(page_text, state)
         if not labels:
-            continue
+            if not (text_mentions_diagram(page_text) and state.get("main")):
+                continue
+            if state.get("sub"):
+                labels = [f"{state['main']}({state['sub']})"]
+            else:
+                labels = [state["main"]]
 
         images = page.get_images(full=True)
-        main_q = labels[0]
-        if main_q in image_by_question:
+        question_key = labels[-1]
+        if question_key in image_by_question:
             continue
 
         image_url = None
@@ -352,16 +357,16 @@ def extract_and_upload_question_images(file_bytes, paper_name):
                     image_info.get("image"),
                     image_info.get("ext", "png"),
                     paper_name,
-                    main_q,
+                    question_key,
                 )
             except Exception as e:
                 print(f"[Image extract skipped] {e}")
 
         if not image_url and text_mentions_diagram(page_text):
-            image_url = upload_question_image(render_diagram_crop(page), "png", paper_name, main_q)
+            image_url = upload_question_image(render_diagram_crop(page), "png", paper_name, question_key)
 
         if image_url:
-            image_by_question[main_q] = image_url
+            image_by_question[question_key] = image_url
     return image_by_question
 
 # ---------- STRIP ALL NOISE ----------
@@ -748,7 +753,10 @@ def upload():
             if main_q:
                 main_key = main_q.group(1)
                 if question_counts.get(main_key, 0) == 1 or text_mentions_diagram(question.get("question_text")):
-                    question["image_url"] = image_map.get(main_key)
+                    question["image_url"] = (
+                        image_map.get(question.get("question"))
+                        or image_map.get(main_key)
+                    )
         print("QP DATA:", qp_data)
         print("MS DATA:", ms_data)
         final_data = merge(qp_data, ms_data)
