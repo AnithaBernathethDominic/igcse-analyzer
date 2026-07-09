@@ -757,6 +757,9 @@ def upload():
                         image_map.get(question.get("question"))
                         or image_map.get(main_key)
                     )
+            if text_mentions_diagram(question.get("question_text")) and not question.get("image_url"):
+                question["needs_review"] = True
+                question["extraction_confidence"] = "poor"
         print("QP DATA:", qp_data)
         print("MS DATA:", ms_data)
         final_data = merge(qp_data, ms_data)
