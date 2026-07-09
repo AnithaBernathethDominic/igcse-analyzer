@@ -259,7 +259,7 @@ def safe_storage_name(value):
 
 def upload_question_image(image_bytes, ext, paper_name, question_no):
     if not image_bytes:
-        return None
+        return {"url": None, "error": "No image bytes were created from the PDF page."}
     safe_paper = safe_storage_name(os.path.splitext(paper_name)[0])
     safe_question = safe_storage_name(question_no)
     file_ext = (ext or "png").lower().lstrip(".")
@@ -269,15 +269,16 @@ def upload_question_image(image_bytes, ext, paper_name, question_no):
         supabase.storage.from_("question-images").upload(
             file_name,
             image_bytes,
-            {"content-type": content_type, "upsert": "true"},
+            {"content-type": content_type, "x-upsert": "true"},
         )
         public = supabase.storage.from_("question-images").get_public_url(file_name)
         if isinstance(public, str):
-            return public
-        return public.get("publicUrl") or public.get("public_url")
+            return {"url": public, "error": None}
+        return {"url": public.get("publicUrl") or public.get("public_url"), "error": None}
     except Exception as e:
-        print(f"[Storage image upload skipped] {e}")
-        return None
+        error = f"Storage upload failed: {e}"
+        print(f"[Storage image upload skipped] {error}")
+        return {"url": None, "error": error}
 
 def text_mentions_diagram(text):
     return bool(re.search(r"\b(diagram|annotate|shown|below|complete)\b", text or "", re.IGNORECASE))
@@ -331,6 +332,7 @@ def render_diagram_crop(page):
 
 def extract_and_upload_question_images(file_bytes, paper_name):
     image_by_question = {}
+    errors_by_question = {}
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
     state = {"main": None, "sub": None}
     for page in pdf:
@@ -350,24 +352,32 @@ def extract_and_upload_question_images(file_bytes, paper_name):
             continue
 
         image_url = None
+        image_error = None
         if images:
             try:
                 image_info = pdf.extract_image(images[0][0])
-                image_url = upload_question_image(
+                upload_result = upload_question_image(
                     image_info.get("image"),
                     image_info.get("ext", "png"),
                     paper_name,
                     question_key,
                 )
+                image_url = upload_result["url"]
+                image_error = upload_result["error"]
             except Exception as e:
-                print(f"[Image extract skipped] {e}")
+                image_error = f"Embedded image extract failed: {e}"
+                print(f"[Image extract skipped] {image_error}")
 
         if not image_url and text_mentions_diagram(page_text):
-            image_url = upload_question_image(render_diagram_crop(page), "png", paper_name, question_key)
+            upload_result = upload_question_image(render_diagram_crop(page), "png", paper_name, question_key)
+            image_url = upload_result["url"]
+            image_error = upload_result["error"]
 
         if image_url:
             image_by_question[question_key] = image_url
-    return image_by_question
+        elif image_error:
+            errors_by_question[question_key] = image_error
+    return image_by_question, errors_by_question
 
 # ---------- STRIP ALL NOISE ----------
 def strip_all_noise(text):
@@ -742,7 +752,7 @@ def upload():
         ms_text    = "\n".join(page["text"] for page in ms_pages)
         qp_data    = parse_qp(qp_text)
         ms_data    = parse_ms(ms_text)
-        image_map  = extract_and_upload_question_images(qp_bytes, paper_name)
+        image_map, image_errors = extract_and_upload_question_images(qp_bytes, paper_name)
         question_counts = {}
         for question in qp_data:
             main_q = re.match(r"^(\d{1,2})", question.get("question", ""))
@@ -757,9 +767,14 @@ def upload():
                         image_map.get(question.get("question"))
                         or image_map.get(main_key)
                     )
+                    question["image_error"] = (
+                        image_errors.get(question.get("question"))
+                        or image_errors.get(main_key)
+                    )
             if text_mentions_diagram(question.get("question_text")) and not question.get("image_url"):
                 question["needs_review"] = True
                 question["extraction_confidence"] = "poor"
+                question["image_error"] = question.get("image_error") or "Diagram mentioned, but no image URL was produced."
         print("QP DATA:", qp_data)
         print("MS DATA:", ms_data)
         final_data = merge(qp_data, ms_data)

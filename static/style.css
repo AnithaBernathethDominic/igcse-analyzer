@@ -149,6 +149,13 @@ button:disabled {
     background: #ffffff;
 }
 
+.image-error {
+    margin: -6px 0 0;
+    color: #b42318;
+    font-size: 14px;
+    font-weight: 700;
+}
+
 summary {
     cursor: pointer;
     color: #1769aa;

@@ -76,6 +76,7 @@ function renderReviewCards() {
         const optionD = escapeHtml(question.option_d || "");
         const answer = escapeHtml(question.answer || "");
         const imageUrl = escapeHtml(question.image_url || "");
+        const imageError = escapeHtml(question.image_error || "");
         const rawText = escapeHtml(question.raw_text || "");
 
         card.innerHTML = `
@@ -106,6 +107,7 @@ function renderReviewCards() {
             <label>Image URL
                 <input data-field="image_url" value="${imageUrl}">
             </label>
+            ${question.image_error ? `<p class="image-error">${imageError}</p>` : ""}
             ${question.image_url ? `<img class="question-image" src="${imageUrl}" alt="Question diagram preview">` : ""}
             <details>
                 <summary>Raw extracted text</summary>
