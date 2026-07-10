@@ -5,3 +5,4 @@ gunicorn
 PyMuPDF
 anthropic
 firebase-admin
+Pillow

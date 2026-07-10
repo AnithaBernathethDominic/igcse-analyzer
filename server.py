@@ -4,8 +4,10 @@ import re
 import json
 import os
 import uuid
+import io
 import fitz  # PyMuPDF
 import anthropic
+from PIL import Image
 from supabase import create_client
 import firebase_admin
 from firebase_admin import auth as firebase_auth
@@ -292,9 +294,10 @@ def is_diagram_question(question_text):
 def text_mentions_diagram(text):
     return is_diagram_question(text)
 
-MAIN_Q_RE = re.compile(r"^\s*(\d{1,2})\s+\S")
-SUB_Q_RE = re.compile(r"^\s*\(([a-h])\)", re.IGNORECASE)
-SUBSUB_Q_RE = re.compile(r"^\s*\((i{1,3}|iv|vi{0,3}|ix|xi{0,3})\)", re.IGNORECASE)
+ROMAN_PART = r"i{1,3}|iv|vi{0,3}|ix|xi{0,3}"
+MAIN_TOKEN_RE = re.compile(rf"^(\d{{1,2}})(?:\(([a-h])\))?(?:\(({ROMAN_PART})\))?$", re.IGNORECASE)
+SUB_TOKEN_RE = re.compile(rf"^\(([a-h])\)(?:\(({ROMAN_PART})\))?$", re.IGNORECASE)
+SUBSUB_TOKEN_RE = re.compile(rf"^\(({ROMAN_PART})\)$", re.IGNORECASE)
 
 class QuestionTracker:
     def __init__(self):
@@ -302,22 +305,25 @@ class QuestionTracker:
         self.sub = None
         self.subsub = None
 
-    def update(self, line):
-        clean = line.strip()
-        if m := MAIN_Q_RE.match(clean):
+    def update_word(self, word, x0, page_width):
+        clean = word.strip().strip(".,;:")
+        if not clean:
+            return None
+
+        if m := MAIN_TOKEN_RE.fullmatch(clean):
             value = int(m.group(1))
-            if 1 <= value <= 20:
+            if 1 <= value <= 20 and x0 <= page_width * 0.35:
                 self.main = m.group(1)
-                self.sub = None
-                self.subsub = None
+                self.sub = m.group(2).lower() if m.group(2) else None
+                self.subsub = m.group(3).lower() if m.group(3) else None
                 return self.label()
-        elif m := SUB_Q_RE.match(clean):
-            if self.main:
+        if m := SUB_TOKEN_RE.fullmatch(clean):
+            if self.main and x0 <= page_width * 0.50:
                 self.sub = m.group(1).lower()
-                self.subsub = None
+                self.subsub = m.group(2).lower() if m.group(2) else None
                 return self.label()
-        elif m := SUBSUB_Q_RE.match(clean):
-            if self.main and self.sub:
+        if m := SUBSUB_TOKEN_RE.fullmatch(clean):
+            if self.main and self.sub and x0 <= page_width * 0.55:
                 self.subsub = m.group(1).lower()
                 return self.label()
         return None
@@ -332,31 +338,28 @@ class QuestionTracker:
             parts.append(f"({self.subsub})")
         return "".join(parts)
 
-def iter_page_lines(page):
-    blocks = page.get_text("dict").get("blocks", [])
-    lines = []
-    for block in blocks:
-        for line in block.get("lines", []):
-            line_text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
-            if line_text:
-                lines.append({"text": line_text, "bbox": fitz.Rect(line["bbox"])})
-    return sorted(lines, key=lambda item: (item["bbox"].y0, item["bbox"].x0))
+def find_label_positions(pdf, labels_in_order):
+    wanted = set(labels_in_order)
+    found = {}
+    tracker = QuestionTracker()
+    for page_index, page in enumerate(pdf):
+        words = page.get_text("words")
+        words.sort(key=lambda word: (word[1], word[0]))
+        for word in words:
+            label = tracker.update_word(word[4], word[0], page.rect.width)
+            if label in wanted and label not in found:
+                found[label] = {
+                    "label": label,
+                    "page": page_index,
+                    "y0": word[1],
+                    "x0": word[0],
+                }
+    return [
+        found.get(label, {"label": label, "page": None, "y0": None, "x0": None})
+        for label in labels_in_order
+    ]
 
-def get_question_blocks(page, tracker):
-    starts = []
-    for line in iter_page_lines(page):
-        label = tracker.update(line["text"])
-        if label:
-            starts.append({"label": label, "y0": line["bbox"].y0})
-
-    blocks = []
-    for index, start in enumerate(starts):
-        next_y = starts[index + 1]["y0"] if index + 1 < len(starts) else page.rect.y1
-        if next_y - start["y0"] >= 30:
-            blocks.append({"label": start["label"], "y0": start["y0"], "y1": next_y})
-    return blocks
-
-def render_question_crop(page, y0, y1, dpi=200):
+def render_page_region(page, y0, y1, dpi=200):
     rect = fitz.Rect(page.rect.x0, y0, page.rect.x1, y1)
     rect = rect + (0, -5, 0, 5)
     rect = rect & page.rect
@@ -366,59 +369,109 @@ def render_question_crop(page, y0, y1, dpi=200):
     pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=rect, alpha=False)
     return pixmap.tobytes("png")
 
-def extract_diagram_image(pdf, page, question_label, y0, y1):
-    for image in page.get_images(full=True):
-        xref = image[0]
-        try:
-            for rect in page.get_image_rects(xref):
-                if y0 <= rect.y0 <= y1 or y0 <= rect.y1 <= y1:
-                    image_info = pdf.extract_image(xref)
-                    return image_info.get("image"), image_info.get("ext", "png")
-        except Exception as e:
-            print(f"[Image rect check skipped for {question_label}] {e}")
+def crop_question_to_next(pdf, page_num, y0, next_page_num=None, next_y0=None, dpi=200):
+    images = []
+    if page_num is None:
+        return images
 
-    return render_question_crop(page, y0, y1), "png"
+    end_page = next_page_num if next_page_num is not None else page_num
+    if end_page < page_num:
+        end_page = page_num
+
+    for current_page_num in range(page_num, end_page + 1):
+        page = pdf[current_page_num]
+        start_y = y0 if current_page_num == page_num else page.rect.y0
+        end_y = page.rect.y1
+        if current_page_num == end_page and next_y0 is not None:
+            end_y = next_y0
+        image = render_page_region(page, start_y, end_y, dpi=dpi)
+        if image:
+            images.append(image)
+    return images
+
+def stitch_vertically(png_bytes_list):
+    images = [Image.open(io.BytesIO(image)).convert("RGB") for image in png_bytes_list]
+    if not images:
+        return None
+
+    width = max(image.width for image in images)
+    total_height = sum(image.height for image in images)
+    canvas = Image.new("RGB", (width, total_height), "white")
+
+    y_offset = 0
+    for image in images:
+        canvas.paste(image, (0, y_offset))
+        y_offset += image.height
+
+    output = io.BytesIO()
+    canvas.save(output, format="PNG")
+    return output.getvalue()
+
+def render_full_page(pdf, page_num, dpi=180):
+    if page_num is None or page_num < 0 or page_num >= len(pdf):
+        return None
+    page = pdf[page_num]
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False)
+    return pixmap.tobytes("png")
+
+def first_available_page(positions, index):
+    for pos in positions[index::-1]:
+        if pos.get("page") is not None:
+            return pos["page"]
+    for pos in positions[index + 1:]:
+        if pos.get("page") is not None:
+            return pos["page"]
+    return 0
+
+def next_located_position(positions, index):
+    for pos in positions[index + 1:]:
+        if pos.get("page") is not None and pos.get("y0") is not None:
+            return pos
+    return None
+
+def get_question_image(pdf, positions, index):
+    pos = positions[index]
+    next_pos = next_located_position(positions, index)
+    if pos.get("y0") is not None and pos.get("page") is not None:
+        parts = crop_question_to_next(
+            pdf,
+            pos["page"],
+            pos["y0"],
+            next_pos["page"] if next_pos else pos["page"],
+            next_pos["y0"] if next_pos else None,
+        )
+        if parts:
+            return stitch_vertically(parts) if len(parts) > 1 else parts[0]
+
+    return render_full_page(pdf, first_available_page(positions, index))
 
 def extract_and_upload_question_images(file_bytes, paper_name, questions=None):
     image_by_question = {}
     errors_by_question = {}
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
-    tracker = QuestionTracker()
-    question_text = {
-        (question.get("question") or question.get("question_no")): question.get("question_text", "")
-        for question in (questions or [])
-    }
-    diagram_labels = {
-        label for label, text in question_text.items()
-        if label and is_diagram_question(text)
-    }
-    for page in pdf:
-        for block in get_question_blocks(page, tracker):
-            question_key = block["label"]
-            if diagram_labels and question_key not in diagram_labels:
-                continue
-            if question_key in image_by_question:
-                continue
+    ordered_questions = questions or []
+    labels_in_order = [
+        question.get("question") or question.get("question_no")
+        for question in ordered_questions
+        if question.get("question") or question.get("question_no")
+    ]
+    positions = find_label_positions(pdf, labels_in_order)
+    position_index = {pos["label"]: index for index, pos in enumerate(positions)}
 
-            try:
-                image_bytes, ext = extract_diagram_image(
-                    pdf,
-                    page,
-                    question_key,
-                    block["y0"],
-                    block["y1"],
-                )
-                upload_result = upload_question_image(image_bytes, ext, paper_name, question_key)
-                if upload_result["url"]:
-                    image_by_question[question_key] = upload_result["url"]
-                elif upload_result["error"]:
-                    errors_by_question[question_key] = upload_result["error"]
-            except Exception as e:
-                errors_by_question[question_key] = f"Image extraction failed: {e}"
+    for question in ordered_questions:
+        question_key = question.get("question") or question.get("question_no")
+        if not question_key or not is_diagram_question(question.get("question_text")):
+            continue
 
-    for label in diagram_labels:
-        if label not in image_by_question and label not in errors_by_question:
-            errors_by_question[label] = "Diagram question detected, but no matching question block was found on the PDF page."
+        try:
+            image_bytes = get_question_image(pdf, positions, position_index[question_key])
+            upload_result = upload_question_image(image_bytes, "png", paper_name, question_key)
+            if upload_result["url"]:
+                image_by_question[question_key] = upload_result["url"]
+            else:
+                errors_by_question[question_key] = upload_result["error"] or "Image upload failed."
+        except Exception as e:
+            errors_by_question[question_key] = f"Image extraction failed: {e}"
 
     return image_by_question, errors_by_question
 
