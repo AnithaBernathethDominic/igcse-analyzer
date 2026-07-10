@@ -280,103 +280,146 @@ def upload_question_image(image_bytes, ext, paper_name, question_no):
         print(f"[Storage image upload skipped] {error}")
         return {"url": None, "error": error}
 
+DIAGRAM_KEYWORDS = {"diagram", "annotate", "shown", "below", "sketch", "label", "figure"}
+COMPLETE_VISUAL_KEYWORDS = {"diagram", "figure", "table", "circuit", "flowchart"}
+
+def is_diagram_question(question_text):
+    text = (question_text or "").lower()
+    if any(keyword in text for keyword in DIAGRAM_KEYWORDS):
+        return True
+    return "complete" in text and any(keyword in text for keyword in COMPLETE_VISUAL_KEYWORDS)
+
 def text_mentions_diagram(text):
-    return bool(re.search(r"\b(diagram|annotate|shown|below|complete)\b", text or "", re.IGNORECASE))
+    return is_diagram_question(text)
 
-def update_question_state_from_page(text, state):
-    labels = []
-    for line in text.splitlines():
+MAIN_Q_RE = re.compile(r"^\s*(\d{1,2})\s+\S")
+SUB_Q_RE = re.compile(r"^\s*\(([a-h])\)", re.IGNORECASE)
+SUBSUB_Q_RE = re.compile(r"^\s*\((i{1,3}|iv|vi{0,3}|ix|xi{0,3})\)", re.IGNORECASE)
+
+class QuestionTracker:
+    def __init__(self):
+        self.main = None
+        self.sub = None
+        self.subsub = None
+
+    def update(self, line):
         clean = line.strip()
-        main_match = re.fullmatch(r"(\d{1,2})", clean)
-        if main_match:
-            value = int(main_match.group(1))
+        if m := MAIN_Q_RE.match(clean):
+            value = int(m.group(1))
             if 1 <= value <= 20:
-                state["main"] = main_match.group(1)
-                state["sub"] = None
-                labels.append(state["main"])
-            continue
-
-        sub_match = re.fullmatch(r"\(([a-h])\)", clean, re.IGNORECASE)
-        if sub_match and state.get("main"):
-            state["sub"] = sub_match.group(1).lower()
-            labels.append(f"{state['main']}({state['sub']})")
-            continue
-
-        ss_match = re.fullmatch(r"\((i{1,3}|iv|vi{0,3}|ix|xi{0,3})\)", clean, re.IGNORECASE)
-        if ss_match and state.get("main") and state.get("sub"):
-            labels.append(f"{state['main']}({state['sub']})({ss_match.group(1).lower()})")
-
-    return labels
-
-def render_diagram_crop(page):
-    hits = page.search_for("diagram") or page.search_for("shown") or page.search_for("below")
-    if not hits:
+                self.main = m.group(1)
+                self.sub = None
+                self.subsub = None
+                return self.label()
+        elif m := SUB_Q_RE.match(clean):
+            if self.main:
+                self.sub = m.group(1).lower()
+                self.subsub = None
+                return self.label()
+        elif m := SUBSUB_Q_RE.match(clean):
+            if self.main and self.sub:
+                self.subsub = m.group(1).lower()
+                return self.label()
         return None
 
-    page_rect = page.rect
-    y0 = min(hit.y1 for hit in hits) + 12
-    if y0 > page_rect.height * 0.75:
-        y0 = page_rect.height * 0.35
+    def label(self):
+        if not self.main:
+            return None
+        parts = [self.main]
+        if self.sub:
+            parts.append(f"({self.sub})")
+        if self.subsub:
+            parts.append(f"({self.subsub})")
+        return "".join(parts)
 
-    clip = fitz.Rect(
-        page_rect.width * 0.08,
-        y0,
-        page_rect.width * 0.92,
-        page_rect.height * 0.90,
-    )
-    if clip.height < 80:
+def iter_page_lines(page):
+    blocks = page.get_text("dict").get("blocks", [])
+    lines = []
+    for block in blocks:
+        for line in block.get("lines", []):
+            line_text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+            if line_text:
+                lines.append({"text": line_text, "bbox": fitz.Rect(line["bbox"])})
+    return sorted(lines, key=lambda item: (item["bbox"].y0, item["bbox"].x0))
+
+def get_question_blocks(page, tracker):
+    starts = []
+    for line in iter_page_lines(page):
+        label = tracker.update(line["text"])
+        if label:
+            starts.append({"label": label, "y0": line["bbox"].y0})
+
+    blocks = []
+    for index, start in enumerate(starts):
+        next_y = starts[index + 1]["y0"] if index + 1 < len(starts) else page.rect.y1
+        if next_y - start["y0"] >= 30:
+            blocks.append({"label": start["label"], "y0": start["y0"], "y1": next_y})
+    return blocks
+
+def render_question_crop(page, y0, y1, dpi=200):
+    rect = fitz.Rect(page.rect.x0, y0, page.rect.x1, y1)
+    rect = rect + (0, -5, 0, 5)
+    rect = rect & page.rect
+    if rect.height < 30 or rect.width < 30:
         return None
-
-    pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip, alpha=False)
+    zoom = dpi / 72
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=rect, alpha=False)
     return pixmap.tobytes("png")
 
-def extract_and_upload_question_images(file_bytes, paper_name):
+def extract_diagram_image(pdf, page, question_label, y0, y1):
+    for image in page.get_images(full=True):
+        xref = image[0]
+        try:
+            for rect in page.get_image_rects(xref):
+                if y0 <= rect.y0 <= y1 or y0 <= rect.y1 <= y1:
+                    image_info = pdf.extract_image(xref)
+                    return image_info.get("image"), image_info.get("ext", "png")
+        except Exception as e:
+            print(f"[Image rect check skipped for {question_label}] {e}")
+
+    return render_question_crop(page, y0, y1), "png"
+
+def extract_and_upload_question_images(file_bytes, paper_name, questions=None):
     image_by_question = {}
     errors_by_question = {}
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
-    state = {"main": None, "sub": None}
+    tracker = QuestionTracker()
+    question_text = {
+        (question.get("question") or question.get("question_no")): question.get("question_text", "")
+        for question in (questions or [])
+    }
+    diagram_labels = {
+        label for label, text in question_text.items()
+        if label and is_diagram_question(text)
+    }
     for page in pdf:
-        page_text = page.get_text()
-        labels = update_question_state_from_page(page_text, state)
-        if not labels:
-            if not (text_mentions_diagram(page_text) and state.get("main")):
+        for block in get_question_blocks(page, tracker):
+            question_key = block["label"]
+            if diagram_labels and question_key not in diagram_labels:
                 continue
-            if state.get("sub"):
-                labels = [f"{state['main']}({state['sub']})"]
-            else:
-                labels = [state["main"]]
+            if question_key in image_by_question:
+                continue
 
-        images = page.get_images(full=True)
-        question_key = labels[-1]
-        if question_key in image_by_question:
-            continue
-
-        image_url = None
-        image_error = None
-        if images:
             try:
-                image_info = pdf.extract_image(images[0][0])
-                upload_result = upload_question_image(
-                    image_info.get("image"),
-                    image_info.get("ext", "png"),
-                    paper_name,
+                image_bytes, ext = extract_diagram_image(
+                    pdf,
+                    page,
                     question_key,
+                    block["y0"],
+                    block["y1"],
                 )
-                image_url = upload_result["url"]
-                image_error = upload_result["error"]
+                upload_result = upload_question_image(image_bytes, ext, paper_name, question_key)
+                if upload_result["url"]:
+                    image_by_question[question_key] = upload_result["url"]
+                elif upload_result["error"]:
+                    errors_by_question[question_key] = upload_result["error"]
             except Exception as e:
-                image_error = f"Embedded image extract failed: {e}"
-                print(f"[Image extract skipped] {image_error}")
+                errors_by_question[question_key] = f"Image extraction failed: {e}"
 
-        if not image_url and text_mentions_diagram(page_text):
-            upload_result = upload_question_image(render_diagram_crop(page), "png", paper_name, question_key)
-            image_url = upload_result["url"]
-            image_error = upload_result["error"]
+    for label in diagram_labels:
+        if label not in image_by_question and label not in errors_by_question:
+            errors_by_question[label] = "Diagram question detected, but no matching question block was found on the PDF page."
 
-        if image_url:
-            image_by_question[question_key] = image_url
-        elif image_error:
-            errors_by_question[question_key] = image_error
     return image_by_question, errors_by_question
 
 # ---------- STRIP ALL NOISE ----------
@@ -752,7 +795,7 @@ def upload():
         ms_text    = "\n".join(page["text"] for page in ms_pages)
         qp_data    = parse_qp(qp_text)
         ms_data    = parse_ms(ms_text)
-        image_map, image_errors = extract_and_upload_question_images(qp_bytes, paper_name)
+        image_map, image_errors = extract_and_upload_question_images(qp_bytes, paper_name, qp_data)
         question_counts = {}
         for question in qp_data:
             main_q = re.match(r"^(\d{1,2})", question.get("question", ""))
