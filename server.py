@@ -5,6 +5,9 @@ import json
 import os
 import uuid
 import io
+import urllib.error
+import urllib.parse
+import urllib.request
 import fitz  # PyMuPDF
 import anthropic
 from PIL import Image
@@ -268,20 +271,35 @@ def upload_question_image(image_bytes, ext, paper_name, question_no):
     content_type = "image/jpeg" if file_ext in ("jpg", "jpeg") else f"image/{file_ext}"
     file_name = f"{safe_paper}/{safe_question}_{uuid.uuid4().hex}.{file_ext}"
     try:
-        supabase.storage.from_("question-images").upload(
-            file_name,
-            image_bytes,
-            {"content-type": content_type, "x-upsert": "true"},
+        encoded_name = urllib.parse.quote(file_name, safe="/")
+        storage_url = (
+            f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/"
+            f"question-images/{encoded_name}"
         )
-        public = supabase.storage.from_("question-images").get_public_url(file_name)
-        if isinstance(public, str):
-            return {"url": public, "error": None}
-        if isinstance(public, dict):
-            return {"url": public.get("publicUrl") or public.get("public_url"), "error": None}
-        return {
-            "url": getattr(public, "public_url", None) or getattr(public, "publicUrl", None),
-            "error": None,
-        }
+        request_obj = urllib.request.Request(
+            storage_url,
+            data=image_bytes,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "apikey": SUPABASE_KEY,
+                "Content-Type": content_type,
+                "x-upsert": "true",
+            },
+        )
+        with urllib.request.urlopen(request_obj, timeout=30):
+            pass
+
+        public_url = (
+            f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/public/"
+            f"question-images/{encoded_name}"
+        )
+        return {"url": public_url, "error": None}
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        error = f"Storage upload failed: HTTP {e.code} {detail}"
+        print(f"[Storage image upload skipped] {error}")
+        return {"url": None, "error": error}
     except Exception as e:
         error = f"Storage upload failed: {e}"
         print(f"[Storage image upload skipped] {error}")
