@@ -276,7 +276,12 @@ def upload_question_image(image_bytes, ext, paper_name, question_no):
         public = supabase.storage.from_("question-images").get_public_url(file_name)
         if isinstance(public, str):
             return {"url": public, "error": None}
-        return {"url": public.get("publicUrl") or public.get("public_url"), "error": None}
+        if isinstance(public, dict):
+            return {"url": public.get("publicUrl") or public.get("public_url"), "error": None}
+        return {
+            "url": getattr(public, "public_url", None) or getattr(public, "publicUrl", None),
+            "error": None,
+        }
     except Exception as e:
         error = f"Storage upload failed: {e}"
         print(f"[Storage image upload skipped] {error}")
@@ -539,19 +544,20 @@ def parse_options(text):
 
 def parse_question_details(question_no, raw_question, cleaned_question_text):
     cleaned_question_text = re.sub(
-        r'^\s*\([a-z]\)(?:\s+|$)',
+        rf'^\s*\((?:[a-z]|{ROMAN_PART})\)(?:\s+|$)',
         '',
         cleaned_question_text,
         flags=re.IGNORECASE,
     ).strip()
 
     marks = None
-    marks_match = re.search(r'\[(\d+)\]\s*$', raw_question.strip())
+    mark_tail = r'\[(\d+)\]\s*[,.;:\s]*$'
+    marks_match = re.search(mark_tail, raw_question.strip())
     if not marks_match:
-        marks_match = re.search(r'\[(\d+)\]\s*$', cleaned_question_text.strip())
+        marks_match = re.search(mark_tail, cleaned_question_text.strip())
     if marks_match:
         marks = int(marks_match.group(1))
-        cleaned_question_text = re.sub(r'\[(\d+)\]\s*$', '', cleaned_question_text).strip()
+        cleaned_question_text = re.sub(mark_tail, '', cleaned_question_text).strip()
 
     options = parse_options(cleaned_question_text)
     if options:
@@ -782,6 +788,7 @@ def merge(qp, ms):
             "option_d":          q.get("option_d"),
             "marks":             q.get("marks"),
             "image_url":         q.get("image_url"),
+            "image_error":       q.get("image_error"),
             "raw_text":          q.get("raw_text", q["question_text"]),
             "needs_review":      q.get("needs_review", False),
             "extraction_confidence": q.get("extraction_confidence", "good"),
