@@ -73,6 +73,7 @@ main{padding:28px 32px;display:flex;flex-direction:column;gap:18px;min-width:0}
 .auth-form input:focus{border-color:var(--accent)}
 .auth-error{display:none;font-size:.8rem;color:var(--danger);line-height:1.45}
 .auth-error.visible{display:block}
+.auth-help{font-size:.76rem;color:var(--muted);line-height:1.4;text-align:center}
 .user-chip{display:none;align-items:center;gap:8px;font-size:.78rem;color:#cbd5e1}
 .user-chip.visible{display:flex}
 .btn-small{padding:5px 9px;font-size:.72rem;border-radius:7px}
@@ -203,12 +204,23 @@ textarea::placeholder{color:#b5b0a8}
 <div class="auth-screen" id="authScreen">
   <div class="auth-panel">
     <h1>IGCSE CS Practice</h1>
-    <p>Sign in to access the question bank.</p>
-    <form class="auth-form" id="loginForm">
-      <input id="loginEmail" type="email" placeholder="Email" autocomplete="email" required>
-      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" required>
-      <button class="btn btn-primary" type="submit" id="loginBtn">Sign In</button>
+    <p>Sign in with your Google account to access the question bank.</p>
+    <div class="auth-form">
+      <button class="btn btn-primary" type="button" id="googleLoginBtn">Sign in with Google</button>
       <div class="auth-error" id="authError"></div>
+    </div>
+  </div>
+</div>
+
+<div class="auth-screen" id="accessScreen" style="display:none">
+  <div class="auth-panel">
+    <h1>Class Access</h1>
+    <p>Enter the class password provided by your teacher.</p>
+    <form class="auth-form" id="accessForm">
+      <input id="classPassword" type="password" placeholder="Class password" autocomplete="current-password" required>
+      <button class="btn btn-primary" type="submit" id="accessBtn">Continue</button>
+      <button class="btn btn-ghost" type="button" id="accessSignOutBtn">Use another Google account</button>
+      <div class="auth-error" id="accessError"></div>
     </form>
   </div>
 </div>
@@ -339,7 +351,7 @@ textarea::placeholder{color:#b5b0a8}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
-  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
+  getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 // ---- STATE ----
@@ -351,6 +363,7 @@ let activeTopic  = '';
 let selectedMcq  = '';
 let auth          = null;
 let currentUser   = null;
+let appBooted     = false;
 
 const DOT_COLORS = [
   '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
@@ -535,7 +548,16 @@ async function authFetch(url, options = {}) {
   const token = await currentUser.getIdToken();
   const headers = new Headers(options.headers || {});
   headers.set("Authorization", `Bearer ${token}`);
-  return fetch(url, {...options, headers});
+  const response = await fetch(url, {...options, headers});
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`;
+    try {
+      const body = await response.clone().json();
+      if (body.error) message = body.error;
+    } catch (_) {}
+    throw new Error(message);
+  }
+  return response;
 }
 
 async function initAuth() {
@@ -552,34 +574,83 @@ async function initAuth() {
   const app = initializeApp(firebaseConfig);
   auth = getAuth(app);
 
-  document.getElementById('loginForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('loginEmail').value.trim();
-    const password = document.getElementById('loginPassword').value;
+  document.getElementById('googleLoginBtn').addEventListener('click', async () => {
     const error = document.getElementById('authError');
-    const btn = document.getElementById('loginBtn');
+    const btn = document.getElementById('googleLoginBtn');
     error.classList.remove('visible');
     btn.disabled = true;
-    btn.textContent = 'Signing in...';
+    btn.textContent = 'Opening Google...';
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithPopup(auth, new GoogleAuthProvider());
     } catch (err) {
-      error.textContent = err.message || 'Sign in failed.';
+      error.textContent = err?.code === 'auth/popup-closed-by-user'
+        ? 'Google sign-in was cancelled.'
+        : (err.message || 'Google sign-in failed.');
       error.classList.add('visible');
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Sign In';
+      btn.textContent = 'Sign in with Google';
     }
   });
 
-  document.getElementById('logoutBtn').addEventListener('click', () => signOut(auth));
+  document.getElementById('accessForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const error = document.getElementById('accessError');
+    const btn = document.getElementById('accessBtn');
+    error.classList.remove('visible');
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+    try {
+      await authFetch('/class-access/verify', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({password: document.getElementById('classPassword').value})
+      });
+      document.getElementById('classPassword').value = '';
+      document.getElementById('accessScreen').style.display = 'none';
+      if (!appBooted) {
+        appBooted = true;
+        boot();
+      }
+    } catch (err) {
+      error.textContent = err.message || 'Could not verify the class password.';
+      error.classList.add('visible');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Continue';
+    }
+  });
 
-  onAuthStateChanged(auth, user => {
+  async function logOut() {
+    try { await fetch('/class-access/logout', {method: 'POST'}); } catch (_) {}
+    appBooted = false;
+    await signOut(auth);
+  }
+  document.getElementById('logoutBtn').addEventListener('click', logOut);
+  document.getElementById('accessSignOutBtn').addEventListener('click', logOut);
+
+  onAuthStateChanged(auth, async user => {
     currentUser = user;
     document.getElementById('authScreen').style.display = user ? 'none' : 'flex';
+    document.getElementById('accessScreen').style.display = user ? 'flex' : 'none';
     document.getElementById('userChip').classList.toggle('visible', !!user);
     document.getElementById('userEmail').textContent = user?.email || '';
-    if (user) boot();
+    if (!user) return;
+    try {
+      const res = await authFetch('/class-access/status');
+      const status = await res.json();
+      if (status.granted) {
+        document.getElementById('accessScreen').style.display = 'none';
+        if (!appBooted) {
+          appBooted = true;
+          boot();
+        }
+      }
+    } catch (err) {
+      const error = document.getElementById('accessError');
+      error.textContent = err.message || 'Could not check class access.';
+      error.classList.add('visible');
+    }
   });
 }
 
@@ -595,10 +666,10 @@ async function boot() {
       const res  = await authFetch('/topics');
       const data = await res.json();
       renderSidebar(data.map(t => ({topic:t, count:''})));
-    } catch(_) {
+    } catch(fallbackError) {
       document.getElementById('sidebar').innerHTML =
         '<div class="sidebar-title">Topics</div>' +
-        '<div class="sidebar-loading">Could not load topics.</div>';
+        `<div class="sidebar-loading">${escapeHtml(fallbackError.message || e.message || 'Could not load topics.')}</div>`;
     }
   }
 }
@@ -643,8 +714,14 @@ async function selectTopic(topic, el, countId) {
   el.classList.add('active');
   activeTopic = topic;
 
-    const res  = await authFetch(`/practice/${encodeURIComponent(topic)}`);
-  questions  = await res.json();
+  let res;
+  try {
+    res = await authFetch(`/practice/${encodeURIComponent(topic)}`);
+    questions = await res.json();
+  } catch (error) {
+    showEmpty(error.message || 'Could not load questions.');
+    return;
+  }
   current    = 0;
   modelShown = false;
 

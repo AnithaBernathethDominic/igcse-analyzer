@@ -1,5 +1,6 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, session
 from functools import wraps
+import hmac
 import re
 import json
 import os
@@ -17,6 +18,13 @@ from firebase_admin import auth as firebase_auth
 from firebase_admin import credentials
 
 app = Flask(__name__)
+CLASS_ACCESS_PASSWORD = os.getenv("CLASS_ACCESS_PASSWORD", "")
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or CLASS_ACCESS_PASSWORD or os.urandom(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=bool(os.getenv("RENDER")),
+)
 
 # ---------- FIREBASE AUTH CONFIG ----------
 FIREBASE_AUTH_DISABLED = os.getenv("FIREBASE_AUTH_DISABLED", "").lower() in ("1", "true", "yes")
@@ -44,7 +52,7 @@ def init_firebase_admin():
 
 FIREBASE_ADMIN_READY = init_firebase_admin()
 
-def require_auth(fn):
+def firebase_auth_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if FIREBASE_AUTH_DISABLED:
@@ -66,10 +74,38 @@ def require_auth(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+def require_auth(fn):
+    @wraps(fn)
+    @firebase_auth_required
+    def wrapper(*args, **kwargs):
+        if FIREBASE_AUTH_DISABLED:
+            return fn(*args, **kwargs)
+        if not CLASS_ACCESS_PASSWORD:
+            return jsonify({"error": "CLASS_ACCESS_PASSWORD is not configured on the server"}), 503
+        if session.get("firebase_uid") != request.firebase_user.get("uid"):
+            return jsonify({"error": "Class password required", "code": "class_access_required"}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
 # ---------- SUPABASE CONFIG ----------
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip().strip("'\"")
+# Prefer a server-only service-role key when one is configured.  Keep the old
+# variable as a fallback so existing deployments continue to work.
+SUPABASE_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    or os.getenv("SUPABASE_KEY")
+    or ""
+).strip().strip("'\"")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def supabase_origin():
+    raw = (SUPABASE_URL or "").strip().strip("'\"")
+    if raw and not re.match(r"^https?://", raw, re.IGNORECASE):
+        raw = "https://" + raw
+    parsed = urllib.parse.urlparse(raw)
+    if not parsed.scheme or not parsed.netloc:
+        return raw.rstrip("/")
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 # ---------- RULE-BASED TOPIC CLASSIFIER ----------
 # Matches IGCSE CS 0478 syllabus topics exactly.
@@ -272,10 +308,8 @@ def upload_question_image(image_bytes, ext, paper_name, question_no):
     file_name = f"{safe_paper}/{safe_question}_{uuid.uuid4().hex}.{file_ext}"
     try:
         encoded_name = urllib.parse.quote(file_name, safe="/")
-        storage_url = (
-            f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/"
-            f"question-images/{encoded_name}"
-        )
+        base_url = supabase_origin()
+        storage_url = f"{base_url}/storage/v1/object/question-images/{encoded_name}"
         request_obj = urllib.request.Request(
             storage_url,
             data=image_bytes,
@@ -290,29 +324,36 @@ def upload_question_image(image_bytes, ext, paper_name, question_no):
         with urllib.request.urlopen(request_obj, timeout=30):
             pass
 
-        public_url = (
-            f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/public/"
-            f"question-images/{encoded_name}"
-        )
+        public_url = f"{base_url}/storage/v1/object/public/question-images/{encoded_name}"
         return {"url": public_url, "error": None}
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         error = f"Storage upload failed: HTTP {e.code} {detail}"
         print(f"[Storage image upload skipped] {error}")
         return {"url": None, "error": error}
+    except urllib.error.URLError as e:
+        parsed = urllib.parse.urlparse(supabase_origin())
+        error = (
+            f"Storage upload failed: could not reach Supabase host "
+            f"'{parsed.netloc or parsed.path}'. Check SUPABASE_URL in Render."
+        )
+        print(f"[Storage image upload skipped] {error}: {e}")
+        return {"url": None, "error": error}
     except Exception as e:
         error = f"Storage upload failed: {e}"
         print(f"[Storage image upload skipped] {error}")
         return {"url": None, "error": error}
 
-DIAGRAM_KEYWORDS = {"diagram", "annotate", "shown", "below", "sketch", "label", "figure"}
+DIAGRAM_KEYWORDS = {"diagram", "annotate", "sketch", "figure"}
 COMPLETE_VISUAL_KEYWORDS = {"diagram", "figure", "table", "circuit", "flowchart"}
 
 def is_diagram_question(question_text):
     text = (question_text or "").lower()
     if any(keyword in text for keyword in DIAGRAM_KEYWORDS):
         return True
-    return "complete" in text and any(keyword in text for keyword in COMPLETE_VISUAL_KEYWORDS)
+    if "complete" in text and any(keyword in text for keyword in COMPLETE_VISUAL_KEYWORDS):
+        return True
+    return bool(re.search(r"\b(label|shown|below)\b.{0,80}\b(diagram|figure|table|circuit|flowchart)\b", text))
 
 def text_mentions_diagram(text):
     return is_diagram_question(text)
@@ -859,6 +900,32 @@ def practice_page():
 def firebase_config():
     return jsonify(FIREBASE_CONFIG)
 
+@app.route("/class-access/status")
+@firebase_auth_required
+def class_access_status():
+    if FIREBASE_AUTH_DISABLED:
+        return jsonify({"granted": True})
+    return jsonify({
+        "granted": session.get("firebase_uid") == request.firebase_user.get("uid")
+    })
+
+@app.route("/class-access/verify", methods=["POST"])
+@firebase_auth_required
+def verify_class_access():
+    if not CLASS_ACCESS_PASSWORD:
+        return jsonify({"error": "CLASS_ACCESS_PASSWORD is not configured on the server"}), 503
+    supplied = str((request.get_json(silent=True) or {}).get("password", ""))
+    if not hmac.compare_digest(supplied, CLASS_ACCESS_PASSWORD):
+        return jsonify({"error": "Incorrect class password"}), 403
+    session.clear()
+    session["firebase_uid"] = request.firebase_user.get("uid")
+    return jsonify({"granted": True})
+
+@app.route("/class-access/logout", methods=["POST"])
+def clear_class_access():
+    session.clear()
+    return jsonify({"ok": True})
+
 @app.route("/upload", methods=["POST"])
 def upload():
     try:
@@ -920,27 +987,39 @@ def save_questions():
 @require_auth
 def get_topics():
     """Return sorted unique topic strings."""
-    resp   = supabase.table("questions").select("topic").execute()
-    topics = sorted(set(item["topic"] for item in resp.data if item["topic"]))
-    return jsonify(topics)
+    try:
+        resp = supabase.table("questions").select("topic").execute()
+        topics = sorted(set(item["topic"] for item in resp.data if item.get("topic")))
+        return jsonify(topics)
+    except Exception as e:
+        app.logger.exception("Could not load topics from Supabase")
+        return jsonify({"error": f"Could not load topics: {e}"}), 500
 
 @app.route("/topics/with-counts")
 @require_auth
 def get_topics_with_counts():
     """Return [{topic, count}] for sidebar badges."""
-    resp = supabase.table("questions").select("topic").execute()
-    counts = {}
-    for item in resp.data:
-        t = item["topic"] or "General"
-        counts[t] = counts.get(t, 0) + 1
-    result = [{"topic": t, "count": c} for t, c in sorted(counts.items())]
-    return jsonify(result)
+    try:
+        resp = supabase.table("questions").select("topic").execute()
+        counts = {}
+        for item in resp.data:
+            t = item.get("topic") or "General"
+            counts[t] = counts.get(t, 0) + 1
+        result = [{"topic": t, "count": c} for t, c in sorted(counts.items())]
+        return jsonify(result)
+    except Exception as e:
+        app.logger.exception("Could not load topic counts from Supabase")
+        return jsonify({"error": f"Could not load topics: {e}"}), 500
 
 @app.route("/practice/<path:topic>")
 @require_auth
 def practice(topic):
-    resp = supabase.table("questions").select("*").eq("topic", topic).execute()
-    return jsonify(resp.data)
+    try:
+        resp = supabase.table("questions").select("*").eq("topic", topic).execute()
+        return jsonify(resp.data)
+    except Exception as e:
+        app.logger.exception("Could not load questions from Supabase")
+        return jsonify({"error": f"Could not load questions: {e}"}), 500
 
 @app.route("/feedback", methods=["POST"])
 @require_auth
